@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"Fdoc/pkg/option"
 	"archive/zip"
 	"fmt"
 	"io"
@@ -9,7 +10,7 @@ import (
 	"strings"
 )
 
-func FindFilesWithExtensions(rootDir string, extensions []string, skipDirs []string) ([]string, error) {
+func FindFilesWithExtensions(rootDir string, extensions []string, skipDirs []string, dateLimit bool) ([]string, error) {
 	var Files []string
 
 	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
@@ -38,6 +39,17 @@ func FindFilesWithExtensions(rootDir string, extensions []string, skipDirs []str
 			// 检查文件扩展名是否匹配所需的扩展名
 			for _, ext := range extensions {
 				if strings.EqualFold(filepath.Ext(info.Name()), ext) {
+					// 如果有日期限制
+					if dateLimit {
+						// 获取文件的修改时间
+						modTime := info.ModTime()
+
+						// 检查修改时间是否在指定日期之后
+						if modTime.After(option.AfterDate) {
+							Files = append(Files, path)
+						}
+						break
+					}
 					Files = append(Files, path)
 					break
 				}
@@ -71,7 +83,7 @@ func GetTotalSize(files []string) int64 {
 // 将多个文件（files []string）打包到一个zip包中
 func FilesToZip(files []string) {
 	// 创建一个输出 ZIP 文件
-	zipFile, err := os.Create(ZipPath)
+	zipFile, err := os.Create(option.ZipPath)
 	if err != nil {
 		fmt.Println("无法创建 ZIP 文件:", err)
 		return
@@ -92,7 +104,7 @@ func FilesToZip(files []string) {
 		defer file.Close()
 
 		// 创建 ZIP 文件中的文件
-		relPath, _ := filepath.Rel(RootDir, filePath)
+		relPath, _ := filepath.Rel(option.RootDir, filePath)
 		writer, err := zipWriter.Create(relPath)
 		if err != nil {
 			fmt.Printf("无法创建 ZIP 文件中的文件 %s: %v\n", relPath, err)
@@ -106,5 +118,5 @@ func FilesToZip(files []string) {
 			continue
 		}
 	}
-	fmt.Printf("文件已成功打包到: %v", ZipPath)
+	fmt.Printf("文件已成功打包到: %v", option.ZipPath)
 }

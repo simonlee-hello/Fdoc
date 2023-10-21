@@ -2,12 +2,13 @@ package main
 
 import (
 	"Fdoc/pkg"
+	"Fdoc/pkg/option"
 	"fmt"
 )
 
 func main() {
 
-	pdfDocxFiles, err := pkg.FindFilesWithExtensions(pkg.RootDir, pkg.Extensions, pkg.SkipDirs)
+	pdfDocxFiles, err := pkg.FindFilesWithExtensions(option.RootDir, option.Extensions, option.SkipDirs, false)
 	if err != nil {
 		fmt.Println("发生错误:", err)
 		return
@@ -15,8 +16,8 @@ func main() {
 
 	totalSize := pkg.GetTotalSize(pdfDocxFiles)
 
-	if totalSize > pkg.MaxSize {
-		fmt.Printf("文件总大小 %d 字节超过 %d 字节，不执行打包操作。\n", totalSize, pkg.MaxSize)
+	if totalSize > option.MaxSize {
+		fmt.Printf("文件总大小 %d 字节超过 %d 字节，不执行打包操作。\n", totalSize, option.MaxSize)
 		return
 	}
 
