@@ -73,3 +73,17 @@ func FilesToZip(rootDir string, zipPath string, files []string) error {
 	fmt.Printf("文件已成功打包到: %v", zipPath)
 	return nil
 }
+
+/*
+读取文件内容
+*/
+func ReadFile(fileName string) (string, error) {
+	b, err := os.ReadFile(fileName)
+	if err != nil {
+		fmt.Printf("err: %v\n", err)
+		return "", err
+	} else {
+		content := string(b[:])
+		return content, nil
+	}
+}

@@ -15,3 +15,25 @@ Usage:
         paths to skip query (short) (default "C:\\Windows, C:\\Program Files, C:\\Program Files (x86), C:\\inetpub, C:\\Users\\Public")
 ```
 
+默认进行文件后缀查询
+
+```
+".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv",".pptx", ".ppt", ".zip", ".rar", ".7z", ".tar", ".gz", ".tgz"
+```
+
+```
+Fdoc -d C:\ -max 10GB -o output.zip
+```
+
+通过文件名进行近似查询
+
+```
+Fdoc -d C:\ -max 10GB -o output.zip -f password,secret,config
+```
+
+通过关键字进行查询（查询文件内容）
+
+```
+Fdoc -d C:\ -max 10GB -o output.zip -k password:,secret:,token:
+```
+
