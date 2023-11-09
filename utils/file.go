@@ -22,6 +22,23 @@ func GetTotalSize(files []string) int64 {
 	return totalSize
 }
 
+func GetTotalSizeAndCheckLimit(files []string, maxSize int64) (int64, bool) {
+	totalSize := int64(0)
+	for _, filePath := range files {
+		fileInfo, err := os.Stat(filePath)
+		if err != nil {
+			fmt.Printf("无法获取文件信息 %s: %v\n", filePath, err)
+			continue
+		}
+		totalSize += fileInfo.Size()
+
+		if totalSize > maxSize {
+			return totalSize, true // 返回标志表示超过了预设值
+		}
+	}
+	return totalSize, false // 返回标志表示未超过预设值
+}
+
 // 将多个文件（files []string）打包到一个zip包中
 func FilesToZip(rootDir string, zipPath string, files []string) error {
 	// 创建一个输出 ZIP 文件
@@ -86,4 +103,13 @@ func ReadFile(fileName string) (string, error) {
 		content := string(b[:])
 		return content, nil
 	}
+}
+
+func IsSymlink(file string) bool {
+	fi, err := os.Lstat(file)
+	if err != nil {
+		return false
+	}
+	mode := fi.Mode()
+	return mode&os.ModeSymlink != 0
 }

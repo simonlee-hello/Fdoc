@@ -2,17 +2,21 @@
 信息收集工具 对目标机器上的文档进行收集并打包
 
 ```
-Usage:
+Usage of Fdoc:
   -d string
-        root path to query (short) (default "c:\\")
+        root path to query (global option) (default "c:\\")
+  -f string
+        query files by filename (only for QueryByFileName),eg. '-f config  -f config,password,secret'
+  -k string
+        query files in content by keyword (only for QueryByKeyword),eg. '-k config -k password:,secret:,token:'
   -max string
-        max file size can be zip (short) (default "1GB")
+        max file size can be zip (global option) (default "1GB")
   -o string
-        zip output path (short) (default "output.zip")
+        zip output path (global option) (default "output.zip")
   -t string
-        only query and pack files after the date,like '2023-10-01' (short)(default "")
+        only query and pack files after the date,like '2023-10-01' (global option)(default "")
   -x string
-        paths to skip query (short) (default "C:\\Windows, C:\\Program Files, C:\\Program Files (x86), C:\\inetpub, C:\\Users\\Public")
+        paths to skip query (global option) (default "C:\\Windows, C:\\Program Files, C:\\Program Files (x86), C:\\inetpub, C:\\Users\\Public")
 ```
 
 默认进行文件后缀查询
