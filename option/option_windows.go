@@ -19,7 +19,7 @@ func GetFlag() *FlagInfo {
 	//flag.StringVar(&info.MaxSize, "maxSize", "1GB", "max file size can be zip")
 	flag.StringVar(&info.MaxSize, "max", "1GB", "max file size can be zip (global option)")
 	//flag.StringVar(&info.ZipPath, "zipPath", "output.zip", "zip output path")
-	flag.StringVar(&info.ZipPath, "o", "output.zip", "zip output path (global option)")
+	flag.StringVar(&info.ZipPath, "o", "output.tar.gz", "zip output path (global option)")
 	//flag.StringVar(&info.AfterDateStr, "afterDateStr", "", "only query and pack the \"AfterDate\" file,Date in the format '2006-01-02'")
 	flag.StringVar(&info.AfterDateStr, "t", "", "only query and pack files after the date,like '2023-10-01' (global option)(default \"\")")
 	//flag.StringVar(&info.RootPath, "rootPath", "c:\\", "root path to query")

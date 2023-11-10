@@ -1,11 +1,14 @@
 package utils
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // 计算文件总大小
@@ -112,4 +115,69 @@ func IsSymlink(file string) bool {
 	}
 	mode := fi.Mode()
 	return mode&os.ModeSymlink != 0
+}
+
+// 将多个文件（files []string）打包到一个tar+gzip归档中
+func FilesToTarGz(rootDir string, tarGzPath string, files []string) error {
+	// 创建一个输出tar+gzip归档文件
+	tarGzFile, err := os.Create(tarGzPath)
+	if err != nil {
+		return err
+	}
+	defer tarGzFile.Close()
+
+	// 创建一个gzip写入器
+	//gzWriter := gzip.NewWriter(tarGzFile)
+	gzWriter, _ := gzip.NewWriterLevel(tarGzFile, gzip.BestSpeed)
+
+	defer gzWriter.Close()
+
+	// 创建一个tar写入器
+	tarWriter := tar.NewWriter(gzWriter)
+	defer tarWriter.Close()
+
+	// 遍历文件列表并将它们添加到tar归档中
+	for _, filePath := range files {
+		file, err := os.Open(filePath)
+		if err != nil {
+			fmt.Printf("无法打开文件 %s: %v\n", filePath, err)
+			continue
+		}
+		defer file.Close()
+
+		// 获取文件信息
+		info, err := file.Stat()
+		if err != nil {
+			fmt.Printf("获取文件信息失败: %v\n", err)
+			continue
+		}
+
+		// 创建tar头
+		header := new(tar.Header)
+		header.Name, _ = filepath.Rel(rootDir, filePath)
+		header.Name = TransformSlash(header.Name)
+		header.Size = info.Size()
+		header.Mode = int64(info.Mode())
+		header.ModTime = info.ModTime()
+
+		// 将头部写入tar归档
+		if err := tarWriter.WriteHeader(header); err != nil {
+			fmt.Printf("写入tar头失败: %v\n", err)
+			continue
+		}
+
+		// 将文件内容拷贝到tar归档中
+		_, err = io.Copy(tarWriter, file)
+		if err != nil {
+			fmt.Printf("无法拷贝文件 %s 到tar归档: %v\n", header.Name, err)
+			continue
+		}
+	}
+
+	fmt.Printf("文件已成功打包到: %v\n", tarGzPath)
+	return nil
+}
+
+func TransformSlash(input string) string {
+	return strings.Replace(input, `\`, `/`, -1)
 }

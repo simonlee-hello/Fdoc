@@ -19,7 +19,7 @@ func QueryAndZip() {
 		return
 	}
 
-	var files []string
+	//var files []string
 	var err error
 	var queryFunc fs.WalkDirFunc
 	if Info.FileName != "" {
@@ -33,7 +33,7 @@ func QueryAndZip() {
 	files, err = WalkDir(queryFunc)
 
 	if err != nil {
-		fmt.Println("发生错误:", err)
+		fmt.Println("err:", err)
 		return
 	}
 	if files == nil {
@@ -41,11 +41,16 @@ func QueryAndZip() {
 		return
 	}
 	totalSize, limit := utils.GetTotalSizeAndCheckLimit(files, utils.SizeToBytes(Info.MaxSize))
-
+	fmt.Printf("totalSize:%v\n", utils.BytesToSize(totalSize))
 	if limit {
-		fmt.Printf("文件总大小 %s 超过 %s 字节，不执行打包操作。\n", utils.BytesToSize(totalSize), Info.MaxSize)
+		fmt.Printf("totalSize more than %s, exit!\n", utils.BytesToSize(totalSize), Info.MaxSize)
 		return
 	}
 
-	utils.FilesToZip(Info.RootPath, Info.ZipPath, files)
+	//err = utils.FilesToZip(Info.RootPath, Info.ZipPath, files)
+	err = utils.FilesToTarGz(Info.RootPath, Info.ZipPath, files)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 }

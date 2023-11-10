@@ -21,6 +21,7 @@ func WalkDir(f fs.WalkDirFunc) ([]string, error) {
 	return files, nil
 }
 
+// WalkDirFunc
 func QueryFilesByExtensions(path string, d fs.DirEntry, err error) error {
 	if err != nil {
 		// 捕获权限错误并跳过该目录
@@ -62,8 +63,13 @@ func QueryFilesByExtensions(path string, d fs.DirEntry, err error) error {
 	return nil
 }
 
+// WalkDirFunc
 func QueryFilesByName(path string, d fs.DirEntry, err error) error {
 	if err != nil {
+		// 捕获权限错误并跳过该目录
+		if os.IsPermission(err) {
+			return nil
+		}
 		return err
 	}
 	// 判断是否是文件且文件名包含指定部分
@@ -89,9 +95,14 @@ func QueryFilesByName(path string, d fs.DirEntry, err error) error {
 	return nil
 }
 
+// WalkDirFunc
 // 速度有些慢，待优化 TODO:优化速度
 func QueryFilesByKeyword(path string, d fs.DirEntry, err error) error {
 	if err != nil {
+		// 捕获权限错误并跳过该目录
+		if os.IsPermission(err) {
+			return nil
+		}
 		return err
 	}
 	if !d.IsDir() && !utils.IsSymlink(path) {
