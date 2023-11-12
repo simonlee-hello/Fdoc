@@ -4,32 +4,9 @@ import (
 	"Fdoc/option"
 	"Fdoc/utils"
 	"github.com/projectdiscovery/gologger"
-	"os"
 )
 
-func QueryAndZip() {
-	info := &option.FlagInfo{}
-	info.GetFlag()
-	gologger.Debug().Str("MaxSize", info.MaxSize).Msg("")
-	gologger.Debug().Str("OutputPath", info.OutputPath).Msg("")
-	gologger.Debug().Str("AfterDateStr", info.AfterDateStr).Msg("")
-	gologger.Debug().Str("RootPath", info.RootPath).Msg("")
-	gologger.Debug().Str("SkipDirs", info.SkipDirs).Msg("")
-	gologger.Debug().Str("FileName", info.FileName).Msg("")
-	gologger.Debug().Str("Keyword", info.Keyword).Msg("")
-	gologger.Debug().Str("Extension", info.Extension).Msg("")
-	// 检查目录是否存在
-	_, dirErr := os.Stat(info.RootPath)
-	if dirErr != nil {
-		gologger.Error().Str("dir", info.RootPath).Msg("Directory does not exist!")
-		return
-	}
-	// 先判断输出文件路径是否存在
-	_, OutputPathExistErr := os.Stat(info.OutputPath)
-	if OutputPathExistErr == nil {
-		gologger.Error().Str("tarGzPath", info.OutputPath).Msg("output tar.gz file exists, please rename tarGzPath")
-		os.Exit(0)
-	}
+func QueryAndZip(info *option.FlagInfo) {
 
 	var files []string
 	var err error
@@ -47,7 +24,8 @@ func QueryAndZip() {
 		return
 	}
 	if files == nil {
-		gologger.Warning().Msg("file not found...\nexiting...")
+		gologger.Warning().Msg("file not found")
+		gologger.Info().Msg("exiting..")
 		return
 	}
 
@@ -55,7 +33,8 @@ func QueryAndZip() {
 	if info.Size {
 		// Execute the GetTotalSize function
 		totalSize := utils.BytesToSize(utils.GetTotalSize(files))
-		gologger.Info().Msgf("totalSize: %v\nexiting..", totalSize)
+		gologger.Info().Msgf("totalSize:%v", totalSize)
+		gologger.Info().Msg("exiting..")
 		return
 	}
 

@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -40,10 +39,13 @@ func walkInternal(rootPath string, skipDirs string, info *option.FlagInfo, files
 			// 检查目录是否需要跳过
 			if d.IsDir() {
 				skip := false
-				for _, skipDir := range utils.ConvertStringToList(skipDirs) {
-					if strings.Compare(path, skipDir) == 0 {
-						skip = true
-						break
+				if skipDirs != "" {
+					for _, skipDir := range utils.ConvertStringToList(skipDirs) {
+						skipDir = filepath.Join(rootPath, skipDir)
+						if strings.Compare(path, skipDir) == 0 {
+							skip = true
+							break
+						}
 					}
 				}
 				if skip {
@@ -59,22 +61,25 @@ func walkInternal(rootPath string, skipDirs string, info *option.FlagInfo, files
 						gologger.Error().Msgf("Error reading symlink: %v\n", err)
 						return nil
 					}
-					// 获取绝对路径
-					absLinkTarget := filepath.Join(filepath.Dir(path), linkTarget)
-					gologger.Debug().Str("absLinkTarget", absLinkTarget)
+
+					// 如果 linkTarget 是相对路径，则转换为绝对路径
+					if !filepath.IsAbs(linkTarget) {
+						linkTarget = filepath.Join(filepath.Dir(path), linkTarget)
+					}
+					gologger.Debug().Str("absLinkTarget", linkTarget)
 					// Check if the absolute link target exists
-					_, err = os.Stat(absLinkTarget)
+					_, err = os.Stat(linkTarget)
 					if err != nil {
 						// Skip if the link target doesn't exist
 						if os.IsNotExist(err) {
-							gologger.Warning().Str("path", absLinkTarget).Msg("file not found")
+							gologger.Warning().Str("path", linkTarget).Msg("file not found")
 							return nil
 						}
 						gologger.Error().Msgf("Error checking symlink target: %v\n", err)
 						return nil
 					}
 					// 递归遍历链接目标
-					return walkInternal(absLinkTarget, skipDirs, info, files)
+					return walkInternal(linkTarget, skipDirs, info, files)
 				}
 
 				// 不是符号链接，正常处理
@@ -137,19 +142,8 @@ func walkInternal(rootPath string, skipDirs string, info *option.FlagInfo, files
 //	return files, nil
 //}
 
-// bool : false 表示 改文件不符合要求
+// bool : false 表示 该文件不符合要求
 func flagQuery(files *[]string, info *option.FlagInfo, path string, d fs.DirEntry) {
-	if info.RootPath == "" {
-		switch runtime.GOOS {
-		case "windows":
-			info.RootPath = "%UserProfile%"
-			if info.SkipDirs == "" {
-				info.SkipDirs = "C:\\Windows, C:\\Program Files, C:\\Program Files (x86), C:\\inetpub, C:\\Users\\Public"
-			}
-		case "linux", "darwin":
-			info.RootPath = "~"
-		}
-	}
 
 	if info.AfterDateStr != "" && !dateFilter(info, d) {
 		return
