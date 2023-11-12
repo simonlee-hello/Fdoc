@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"fmt"
+	"github.com/projectdiscovery/gologger"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,9 +16,9 @@ import (
 func GetTotalSize(files []string) int64 {
 	totalSize := int64(0)
 	for _, filePath := range files {
-		fileInfo, err := os.Stat(filePath)
+		fileInfo, err := os.Lstat(filePath)
 		if err != nil {
-			fmt.Printf("无法获取文件信息 %s: %v\n", filePath, err)
+			gologger.Error().Msgf("Unable to obtain file information %s: %v\n", filePath, err)
 			continue
 		}
 		totalSize += fileInfo.Size()
@@ -30,7 +31,7 @@ func GetTotalSizeAndCheckLimit(files []string, maxSize int64) (int64, bool) {
 	for _, filePath := range files {
 		fileInfo, err := os.Stat(filePath)
 		if err != nil {
-			fmt.Printf("无法获取文件信息 %s: %v\n", filePath, err)
+			gologger.Warning().Str("filePath", filePath).Str("err", err.Error()).Msg("Unable to obtain file information.")
 			continue
 		}
 		totalSize += fileInfo.Size()
@@ -43,11 +44,12 @@ func GetTotalSizeAndCheckLimit(files []string, maxSize int64) (int64, bool) {
 }
 
 // 将多个文件（files []string）打包到一个zip包中
-func FilesToZip(rootDir string, zipPath string, files []string) error {
+func FilesToZip(rootDir string, zipPath string, files []string) {
 	// 创建一个输出 ZIP 文件
 	zipFile, err := os.Create(zipPath)
 	if err != nil {
-		return err
+		gologger.Error().Msgf("output file create failed")
+		return
 	}
 	defer zipFile.Close()
 
@@ -59,7 +61,7 @@ func FilesToZip(rootDir string, zipPath string, files []string) error {
 	for _, filePath := range files {
 		file, err := os.Open(filePath)
 		if err != nil {
-			fmt.Printf("无法打开文件 %s: %v\n", filePath, err)
+			gologger.Warning().Msgf("Unable to open the file %s: %v\n", filePath, err)
 			continue
 		}
 		defer file.Close()
@@ -67,12 +69,14 @@ func FilesToZip(rootDir string, zipPath string, files []string) error {
 		// 获取文件信息
 		info, err := file.Stat()
 		if err != nil {
-			fmt.Printf("获取文件信息失败: %v\n", err)
+			gologger.Warning().Msgf("Failed to obtain file information: %v\n", err)
+			continue
 		}
 		// 创建一个文件头，以保留日期等信息
 		header, err := zip.FileInfoHeader(info)
 		if err != nil {
-			fmt.Printf("创建文件头失败: %v\n", err)
+			gologger.Warning().Msgf("Failed to read file header: %v\n", err)
+			continue
 		}
 
 		// 创建 ZIP 文件中的文件
@@ -80,18 +84,18 @@ func FilesToZip(rootDir string, zipPath string, files []string) error {
 		header.Name = relPath
 		writer, err := zipWriter.CreateHeader(header)
 		if err != nil {
-			return err
+			gologger.Warning().Msgf("Failed to create file header: %v\n", err)
+			continue
 		}
 
 		// 将文件内容拷贝到 ZIP 文件中
 		_, err = io.Copy(writer, file)
 		if err != nil {
-			fmt.Printf("无法拷贝文件 %s 到 ZIP 文件: %v\n", header.Name, err)
+			gologger.Warning().Msgf("Unable to copy %s to ZIP file: %v\n", header.Name, err)
 			continue
 		}
 	}
-	fmt.Printf("文件已成功打包到: %v", zipPath)
-	return nil
+	gologger.Info().Msgf("The file has been successfully packaged to: %v", zipPath)
 }
 
 /*
@@ -118,11 +122,13 @@ func IsSymlink(file string) bool {
 }
 
 // 将多个文件（files []string）打包到一个tar+gzip归档中
-func FilesToTarGz(rootDir string, tarGzPath string, files []string) error {
+func FilesToTarGz(rootDir string, tarGzPath string, files []string) {
+
 	// 创建一个输出tar+gzip归档文件
 	tarGzFile, err := os.Create(tarGzPath)
 	if err != nil {
-		return err
+		gologger.Error().Msgf("output file create failed")
+		return
 	}
 	defer tarGzFile.Close()
 
@@ -140,7 +146,7 @@ func FilesToTarGz(rootDir string, tarGzPath string, files []string) error {
 	for _, filePath := range files {
 		file, err := os.Open(filePath)
 		if err != nil {
-			fmt.Printf("无法打开文件 %s: %v\n", filePath, err)
+			gologger.Warning().Msgf("Unable to open the file %s: %v\n", filePath, err)
 			continue
 		}
 		defer file.Close()
@@ -148,7 +154,7 @@ func FilesToTarGz(rootDir string, tarGzPath string, files []string) error {
 		// 获取文件信息
 		info, err := file.Stat()
 		if err != nil {
-			fmt.Printf("获取文件信息失败: %v\n", err)
+			gologger.Warning().Msgf("Failed to obtain file information: %v\n", err)
 			continue
 		}
 
@@ -162,20 +168,20 @@ func FilesToTarGz(rootDir string, tarGzPath string, files []string) error {
 
 		// 将头部写入tar归档
 		if err := tarWriter.WriteHeader(header); err != nil {
-			fmt.Printf("写入tar头失败: %v\n", err)
+			gologger.Warning().Msgf("Failed to write tar header: %v\n", err)
 			continue
 		}
 
 		// 将文件内容拷贝到tar归档中
 		_, err = io.Copy(tarWriter, file)
 		if err != nil {
-			fmt.Printf("无法拷贝文件 %s 到tar归档: %v\n", header.Name, err)
+			gologger.Warning().Msgf("Unable to copy %s to tar archive: %v\n", header.Name, err)
 			continue
 		}
 	}
+	tarGzSize := BytesToSize(GetTotalSize([]string{tarGzPath}))
 
-	fmt.Printf("文件已成功打包到: %v\n", tarGzPath)
-	return nil
+	gologger.Info().Str("path", tarGzPath).Str("size", tarGzSize).Msg("SUCCESS!")
 }
 
 func TransformSlash(input string) string {
