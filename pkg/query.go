@@ -4,7 +4,6 @@ import (
 	"Fdoc/option"
 	"Fdoc/utils"
 	"fmt"
-	"github.com/projectdiscovery/gologger"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,152 +11,121 @@ import (
 	"time"
 )
 
-func WalkQuery(rootPath string, skipDirs string, info *option.FlagInfo) []string {
-	var files []string
-	err := walkInternal(info.RootPath, skipDirs, info, &files)
-	if err != nil {
-		gologger.Error().Msgf("Error walking directory: %v", err)
-		return nil
-	}
-
-	return files
-}
-
-func walkInternal(rootPath string, skipDirs string, info *option.FlagInfo, files *[]string) error {
-	return filepath.WalkDir(
-		rootPath,
-		func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				// 捕获权限错误并跳过该目录
-				if os.IsPermission(err) {
-					gologger.Warning().Msgf("permission error: %v", err)
-					return nil
-				}
-				return nil
-			}
-
-			// 检查目录是否需要跳过
-			if d.IsDir() {
-				skip := false
-				if skipDirs != "" {
-					for _, skipDir := range utils.ConvertStringToList(skipDirs) {
-						skipDir = filepath.Join(rootPath, skipDir)
-						if strings.Compare(path, skipDir) == 0 {
-							skip = true
-							break
-						}
-					}
-				}
-				if skip {
-					return filepath.SkipDir
-				}
-
-				// 过滤日期
-			} else {
-				// 修改此处，判断是否为符号链接，如果是，递归遍历链接目标
-				if d.Type()&fs.ModeSymlink != 0 {
-					linkTarget, err := os.Readlink(path)
-					if err != nil {
-						gologger.Error().Msgf("Error reading symlink: %v\n", err)
-						return nil
-					}
-
-					// 如果 linkTarget 是相对路径，则转换为绝对路径
-					if !filepath.IsAbs(linkTarget) {
-						linkTarget = filepath.Join(filepath.Dir(path), linkTarget)
-					}
-					gologger.Debug().Str("absLinkTarget", linkTarget)
-					// Check if the absolute link target exists
-					_, err = os.Stat(linkTarget)
-					if err != nil {
-						// Skip if the link target doesn't exist
-						if os.IsNotExist(err) {
-							gologger.Warning().Str("path", linkTarget).Msg("file not found")
-							return nil
-						}
-						gologger.Error().Msgf("Error checking symlink target: %v\n", err)
-						return nil
-					}
-					// 递归遍历链接目标
-					return walkInternal(linkTarget, skipDirs, info, files)
-				}
-
-				// 不是符号链接，正常处理
-				flagQuery(files, info, path, d)
-			}
-
-			return nil
-		},
-	)
-}
-
-// func WalkQuery(info *option.FlagInfo) ([]string, error) {
-//func WalkQuery(rootPath string, skipDirs string, info *option.FlagInfo) ([]string, error) {
+//func WalkQuery(rootPath string, skipDirs string, info *option.FlagInfo) []string {
 //	var files []string
-//	err := filepath.WalkDir(
+//	err := walkInternal(info.RootPath, skipDirs, info, &files)
+//	if err != nil {
+//		gologger.Error().Msgf("Error walking directory: %v", err)
+//		return nil
+//	}
+//
+//	return files
+//}
+
+//func walkInternal(rootPath string, skipDirs string, info *option.FlagInfo, files *[]string) error {
+//	return filepath.WalkDir(
 //		rootPath,
 //		func(path string, d fs.DirEntry, err error) error {
 //			if err != nil {
 //				// 捕获权限错误并跳过该目录
 //				if os.IsPermission(err) {
+//					gologger.Warning().Msgf("permission error: %v", err)
 //					return nil
 //				}
-//				return err
+//				gologger.Warning().Msgf("Error while traversing the directory：%v", err)
+//				return nil
 //			}
+//
 //			// 检查目录是否需要跳过
 //			if d.IsDir() {
-//
 //				skip := false
-//				for _, skipDir := range utils.ConvertStringToList(skipDirs) {
-//					if strings.Compare(path, skipDir) == 0 {
-//						skip = true
-//						break
+//				if skipDirs != "" {
+//					for _, skipDir := range utils.ConvertStringToList(skipDirs) {
+//						skipDir = filepath.Join(rootPath, skipDir)
+//						if strings.Compare(path, skipDir) == 0 {
+//							skip = true
+//							break
+//						}
 //					}
 //				}
 //				if skip {
 //					return filepath.SkipDir
 //				}
+//
 //				// 过滤日期
 //			} else {
 //				// 修改此处，判断是否为符号链接，如果是，递归遍历链接目标
 //				if d.Type()&fs.ModeSymlink != 0 {
 //					linkTarget, err := os.Readlink(path)
 //					if err != nil {
-//						fmt.Printf("Error reading symlink: %v\n", err)
+//						gologger.Error().Msgf("Error reading symlink: %v\n", err)
+//						return nil
+//					}
+//
+//					// 如果 linkTarget 是相对路径，则转换为绝对路径
+//					if !filepath.IsAbs(linkTarget) {
+//						linkTarget = filepath.Join(filepath.Dir(path), linkTarget)
+//					}
+//					gologger.Debug().Str("absLinkTarget", linkTarget)
+//					// Check if the absolute link target exists
+//					_, err = os.Stat(linkTarget)
+//					if err != nil {
+//						// Skip if the link target doesn't exist
+//						if os.IsNotExist(err) {
+//							gologger.Warning().Str("path", linkTarget).Msg("file not found")
+//							return nil
+//						}
+//						gologger.Error().Msgf("Error checking symlink target: %v\n", err)
 //						return nil
 //					}
 //					// 递归遍历链接目标
-//					return WalkQuery(linkTarget, skipDirs, info)
+//					return walkInternal(linkTarget, skipDirs, info, files)
 //				}
 //
-//				flagQuery(&files, info, path, d)
+//				// 不是符号链接，正常处理
+//				flagQuery(files, info, path, d)
 //			}
+//
 //			return nil
 //		},
 //	)
-//	if err != nil {
-//		return nil, fmt.Errorf("Error walking directory: %v", err)
-//	}
-//
-//	return files, nil
 //}
 
 // bool : false 表示 该文件不符合要求
-func flagQuery(files *[]string, info *option.FlagInfo, path string, d fs.DirEntry) {
+//func flagQuery(files *[]string, info *option.FlagInfo, path string, d fs.DirEntry) {
+//
+//	if info.AfterDateStr != "" && !dateFilter(info, d) {
+//		return
+//	}
+//	if info.FileName != "" && !filenameFilter(info, d) {
+//		return
+//	}
+//	if info.Keyword != "" && !keywordFilter(info, d) {
+//		return
+//	}
+//	if !extFilter(info, d) {
+//		return
+//	}
+//	*files = append(*files, path)
+//
+//}
+
+// bool : false 表示 该文件不符合要求
+func fileFilter(info *option.FlagInfo, path string, d fs.DirEntry) bool {
 
 	if info.AfterDateStr != "" && !dateFilter(info, d) {
-		return
+		return false
 	}
 	if info.FileName != "" && !filenameFilter(info, d) {
-		return
+		return false
 	}
 	if info.Keyword != "" && !keywordFilter(info, d) {
-		return
+		return false
 	}
 	if !extFilter(info, d) {
-		return
+		return false
 	}
-	*files = append(*files, path)
+	return true
 
 }
 

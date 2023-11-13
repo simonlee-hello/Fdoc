@@ -1,9 +1,7 @@
 package utils
 
 import (
-	"archive/tar"
 	"archive/zip"
-	"compress/gzip"
 	"fmt"
 	"github.com/projectdiscovery/gologger"
 	"io"
@@ -121,69 +119,25 @@ func IsSymlink(file string) bool {
 	return mode&os.ModeSymlink != 0
 }
 
-// 将多个文件（files []string）打包到一个tar+gzip归档中
-func FilesToTarGz(rootDir string, tarGzPath string, files []string) {
-
-	// 创建一个输出tar+gzip归档文件
-	tarGzFile, err := os.Create(tarGzPath)
-	if err != nil {
-		gologger.Error().Msgf("output file create failed")
-		return
-	}
-	defer tarGzFile.Close()
-
-	// 创建一个gzip写入器
-	//gzWriter := gzip.NewWriter(tarGzFile)
-	gzWriter, _ := gzip.NewWriterLevel(tarGzFile, gzip.BestSpeed)
-
-	defer gzWriter.Close()
-
-	// 创建一个tar写入器
-	tarWriter := tar.NewWriter(gzWriter)
-	defer tarWriter.Close()
-
-	// 遍历文件列表并将它们添加到tar归档中
-	for _, filePath := range files {
-		file, err := os.Open(filePath)
-		if err != nil {
-			gologger.Warning().Msgf("Unable to open the file %s: %v\n", filePath, err)
-			continue
-		}
-		defer file.Close()
-
-		// 获取文件信息
-		info, err := file.Stat()
-		if err != nil {
-			gologger.Warning().Msgf("Failed to obtain file information: %v\n", err)
-			continue
-		}
-
-		// 创建tar头
-		header := new(tar.Header)
-		header.Name, _ = filepath.Rel(rootDir, filePath)
-		header.Name = TransformSlash(header.Name)
-		header.Size = info.Size()
-		header.Mode = int64(info.Mode())
-		header.ModTime = info.ModTime()
-
-		// 将头部写入tar归档
-		if err := tarWriter.WriteHeader(header); err != nil {
-			gologger.Warning().Msgf("Failed to write tar header: %v\n", err)
-			continue
-		}
-
-		// 将文件内容拷贝到tar归档中
-		_, err = io.Copy(tarWriter, file)
-		if err != nil {
-			gologger.Warning().Msgf("Unable to copy %s to tar archive: %v\n", header.Name, err)
-			continue
-		}
-	}
-	tarGzSize := BytesToSize(GetTotalSize([]string{tarGzPath}))
-
-	gologger.Info().Str("path", tarGzPath).Str("size", tarGzSize).Msg("SUCCESS!")
-}
-
 func TransformSlash(input string) string {
 	return strings.Replace(input, `\`, `/`, -1)
+}
+
+//func IsTarGzEmpty(filename string, threshold int64) bool {
+//	fileInfo, err := os.Stat(filename)
+//	if err != nil {
+//		gologger.Warning().Msgf("IsTarGzEmpty stat file failed, err: %v", err)
+//		return false
+//	}
+//
+//	// 检查文件大小是否小于阈值
+//	return fileInfo.Size() <= threshold
+//}
+
+func DeleteFile(path string) {
+	err := os.Remove(path)
+	if err != nil {
+		gologger.Error().Str("path", path).Msg("delete failed")
+		return
+	}
 }

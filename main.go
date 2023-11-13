@@ -18,5 +18,5 @@ func main() {
 
 	info := &option.FlagInfo{}
 	info.InitFlag()
-	pkg.QueryAndZip(info)
+	pkg.QueryAndCompress(info)
 }
