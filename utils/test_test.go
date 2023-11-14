@@ -11,7 +11,7 @@ import (
 )
 
 func TestName(t *testing.T) {
-	//res := IsSymlink("/Users/simon/Downloads/IDAPro/dbgsrv")
+	//res := IsLink("/Users/simon/Downloads/IDAPro/dbgsrv")
 	//fmt.Println(res)
 
 	//password := "your_password_here" // 替换为你的密码
@@ -19,7 +19,7 @@ func TestName(t *testing.T) {
 	path := "/Users/simon/Downloads/IDAPro/dbgsrv"
 	file, _ := os.Open(path)
 	fmt.Println(file.Stat())
-	fmt.Println(IsSymlink(path))
+	//fmt.Println(IsSymlink(path))
 }
 
 func TestLogger(t *testing.T) {
@@ -57,8 +57,4 @@ func TestStat(t *testing.T) {
 	if err != nil {
 		fmt.Println(err)
 	}
-}
-
-func TestLnk(t *testing.T) {
-	fmt.Println(IsSymlink("/Users/simon/Desktop/tmp/test/dbgsrv"))
 }

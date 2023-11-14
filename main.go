@@ -14,9 +14,12 @@ func main() {
 	gologger.DefaultLogger.SetMaxLevel(levels.LevelWarning)
 	//不带颜色打印
 	gologger.DefaultLogger.SetFormatter(formatter.NewCLI(true))
-	gologger.DefaultLogger.SetTimestamp(true, levels.LevelWarning)
+	//gologger.DefaultLogger.SetTimestamp(true, levels.LevelDebug)
+	gologger.DefaultLogger.SetTimestamp(true, levels.LevelFatal)
 
 	info := &option.FlagInfo{}
 	info.InitFlag()
-	pkg.QueryAndCompress(info)
+	gologger.Info().Msg("Starting..")
+	pkg.WalkAndCompress(info)
+	gologger.Info().Msg("Exiting..")
 }

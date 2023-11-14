@@ -69,7 +69,7 @@ func (info *FlagInfo) InitFlag() {
 
 		switch runtime.GOOS {
 		case "windows":
-			info.RootPath = homeDir + "\\Desktop"
+			info.RootPath = homeDir
 			if info.SkipDirs == "" {
 				info.SkipDirs = "C:\\Windows, C:\\Program Files, C:\\Program Files (x86), C:\\inetpub, C:\\Users\\Public"
 			}
