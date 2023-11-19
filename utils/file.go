@@ -3,7 +3,6 @@ package utils
 import (
 	"github.com/projectdiscovery/gologger"
 	"os"
-	"strings"
 )
 
 // 计算文件总大小
@@ -37,10 +36,6 @@ func GetTotalSize(files []string) int64 {
 //		return false
 //	}
 //}
-
-func TransformSlash(input string) string {
-	return strings.Replace(input, `\`, `/`, -1)
-}
 
 func DeleteFile(path string) {
 	if IsFileExists(path) {

@@ -35,7 +35,7 @@ func (ff *FileFilter) extFilter(d fs.DirEntry) bool {
 	}
 
 	ext := filepath.Ext(d.Name())
-	extensionsMap := utils.StringToExtensionsMap(ff.info.Extension)
+	extensionsMap := utils.StringToMap(ff.info.Extension)
 	if ff.info.Extension == "all" {
 		extensionsMap = map[string]struct{}{
 			".pdf": {}, ".docx": {}, ".doc": {}, ".xlsx": {}, ".xls": {}, ".csv": {},

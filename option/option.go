@@ -34,26 +34,6 @@ func (info *FlagInfo) String() string {
 		info.MaxSize, info.OutputPath, info.AfterDateStr, info.RootPath, info.SkipDirs, info.FileName, info.Keyword, info.Extension, info.Size)
 }
 
-func (info *FlagInfo) GetFlag() {
-
-	//flag.StringVar(&info.MaxSize, "maxSize", "1GB", "max file size can be zip")
-	flag.StringVar(&info.MaxSize, "max", "1GB", "max file size can be zip (global option)")
-	//flag.StringVar(&info.OutputPath, "zipPath", "output.zip", "zip output path")
-	flag.StringVar(&info.OutputPath, "o", "output.tar.gz", "zip output path (global option)")
-	//flag.StringVar(&info.AfterDateStr, "afterDateStr", "", "only query and pack the \"AfterDate\" file,Date in the format '2006-01-02'")
-	flag.StringVar(&info.AfterDateStr, "t", "", "only query and pack files after the date,like '2023-10-01' (global option)(default \"\")")
-	//flag.StringVar(&info.RootPath, "rootPath", "c:\\", "root path to query")
-	flag.StringVar(&info.RootPath, "d", "", "root path to query (global option)")
-	//flag.StringVar(&info.SkipDirs, "skipDirs", "C:\\Windows, C:\\Program Files, C:\\Program Files (x86), C:\\inetpub, C:\\Users\\Public", "paths to skip query")
-	flag.StringVar(&info.SkipDirs, "x", "", "paths to skip query (global option)")
-	flag.StringVar(&info.FileName, "f", "", "query files by filename (only for QueryByFileName),eg. '-f config  -f config,password,secret'")
-	flag.StringVar(&info.Keyword, "k", "", "query files in content by keyword (only for QueryByKeyword),eg. '-k config -k password:,secret:,token:'")
-	flag.StringVar(&info.Extension, "e", "", "query files by extension,eg. '-e pdf,doc,zip'")
-	flag.BoolVar(&info.Size, "size", false, "Calculate total size")
-
-	flag.Parse()
-}
-
 func (info *FlagInfo) InitFlag() {
 	info.GetFlag()
 	// 初始化RootPath
@@ -98,4 +78,24 @@ func (info *FlagInfo) InitFlag() {
 	gologger.Debug().Str("FileName", info.FileName).Msg("")
 	gologger.Debug().Str("Keyword", info.Keyword).Msg("")
 	gologger.Debug().Str("Extension", info.Extension).Msg("")
+}
+
+func (info *FlagInfo) GetFlag() {
+
+	//flag.StringVar(&info.MaxSize, "maxSize", "1GB", "max file size can be zip")
+	flag.StringVar(&info.MaxSize, "max", "1GB", "max file size can be zip (global option)")
+	//flag.StringVar(&info.OutputPath, "zipPath", "output.zip", "zip output path")
+	flag.StringVar(&info.OutputPath, "o", "output.tar.gz", "zip output path (global option)")
+	//flag.StringVar(&info.AfterDateStr, "afterDateStr", "", "only query and pack the \"AfterDate\" file,Date in the format '2006-01-02'")
+	flag.StringVar(&info.AfterDateStr, "t", "", "only query and pack files after the date,like '2023-10-01' (global option)(default \"\")")
+	//flag.StringVar(&info.RootPath, "rootPath", "c:\\", "root path to query")
+	flag.StringVar(&info.RootPath, "d", "", "root path to query (global option)")
+	//flag.StringVar(&info.SkipDirs, "skipDirs", "C:\\Windows, C:\\Program Files, C:\\Program Files (x86), C:\\inetpub, C:\\Users\\Public", "paths to skip query")
+	flag.StringVar(&info.SkipDirs, "x", "", "paths to skip query (global option)")
+	flag.StringVar(&info.FileName, "f", "", "query files by filename (only for QueryByFileName),eg. '-f config  -f config,password,secret'")
+	flag.StringVar(&info.Keyword, "k", "", "query files in content by keyword (only for QueryByKeyword),eg. '-k config -k password:,secret:,token:'")
+	flag.StringVar(&info.Extension, "e", "", "query files by extension,eg. '-e pdf,doc,zip'")
+	flag.BoolVar(&info.Size, "size", false, "Calculate total size")
+
+	flag.Parse()
 }

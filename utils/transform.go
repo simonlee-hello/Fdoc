@@ -77,21 +77,26 @@ func ConvertStringToList(input string) []string {
 	return result
 }
 
-func StringToExtensionsMap(supportedExtensions string) map[string]struct{} {
-	extensionsMap := make(map[string]struct{})
+// 将字符串转为map，例如："docx,pdf,xlsx" -> {".pdf": {}, ".docx": {}, ".doc": {}, ".xlsx": {}}
+func StringToMap(supportedExtensions string) map[string]struct{} {
+	m := make(map[string]struct{})
 
 	// 将以逗号分隔的字符串分割成切片
-	extensionsList := strings.Split(supportedExtensions, ",")
+	list := strings.Split(supportedExtensions, ",")
 
 	// 遍历切片并将每个扩展名添加到映射中
-	for _, ext := range extensionsList {
+	for _, ext := range list {
 		// 去除空格
 		ext = strings.TrimSpace(ext)
 		if ext != "" {
 			// 将扩展名转换为小写并添加到映射中
-			extensionsMap["."+strings.ToLower(ext)] = struct{}{}
+			m["."+strings.ToLower(ext)] = struct{}{}
 		}
 	}
 
-	return extensionsMap
+	return m
+}
+
+func TransformSlash(input string) string {
+	return strings.Replace(input, `\`, `/`, -1)
 }

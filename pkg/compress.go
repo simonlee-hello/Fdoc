@@ -12,6 +12,7 @@ import (
 )
 
 func WalkAndCompress(info *option.FlagInfo) {
+	gologger.Info().Msg("Starting..")
 	var tarGzWriter *compress.TarGzWriter
 
 	if !info.Size {
@@ -127,5 +128,5 @@ func WalkAndCompress(info *option.FlagInfo) {
 	} else {
 		gologger.Info().Str("path", info.OutputPath).Str("size", tarGzSize).Msg("SUCCESS!")
 	}
-
+	gologger.Info().Msg("Exiting..")
 }

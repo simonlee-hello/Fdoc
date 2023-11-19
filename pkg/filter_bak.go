@@ -45,7 +45,7 @@ func extFilter(info *option.FlagInfo, d fs.DirEntry) bool {
 	} else if info.Extension == "" {
 		return true
 	} else {
-		extensionsMap = utils.StringToExtensionsMap(info.Extension)
+		extensionsMap = utils.StringToMap(info.Extension)
 	}
 	// 检查文件扩展名是否匹配所需的扩展名
 	if _, ok := extensionsMap[ext]; ok {
