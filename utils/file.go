@@ -19,24 +19,6 @@ func GetTotalSize(files []string) int64 {
 	return totalSize
 }
 
-//func IsLink(file string) bool {
-//	info, err := os.Lstat(file)
-//	if err != nil {
-//		gologger.Error().Str("err", err.Error()).Msg("IsLink error")
-//		return false
-//	}
-//
-//	if runtime.GOOS == "windows" && filepath.Ext(file) == ".lnk" {
-//		// 在 Windows 上，检查文件的属性
-//		return true
-//	} else if runtime.GOOS == "linux" {
-//		// 在 Linux上，检查文件的模式和IsDir方法
-//		return (info.Mode()&os.ModeSymlink) != 0 || info.IsDir()
-//	} else {
-//		return false
-//	}
-//}
-
 func DeleteFile(path string) {
 	if IsFileExists(path) {
 		err := os.Remove(path)

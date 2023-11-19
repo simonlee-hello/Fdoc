@@ -85,7 +85,7 @@ func (ff *FileFilter) keywordFilter(path string) bool {
 
 	file, err := os.Open(path)
 	if err != nil {
-		gologger.Error().Msgf("无法打开文件：%v", err)
+		gologger.Error().Msgf("open file error：%v", err)
 		return false
 	}
 	defer file.Close()
@@ -101,7 +101,7 @@ func (ff *FileFilter) keywordFilter(path string) bool {
 	}
 
 	if err := scanner.Err(); err != nil {
-		gologger.Error().Msgf("读取文件时发生错误：%v", err)
+		gologger.Error().Msgf("error when reading file：%v", err)
 		return false
 	}
 

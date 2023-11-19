@@ -2,7 +2,6 @@ package option
 
 import (
 	"flag"
-	"fmt"
 	"github.com/projectdiscovery/gologger"
 	"os"
 	"os/user"
@@ -19,19 +18,6 @@ type FlagInfo struct {
 	Keyword      string
 	Extension    string
 	Size         bool
-}
-
-func (info *FlagInfo) String() string {
-	return fmt.Sprintf("MaxSize: \"%s\";"+
-		"OutputPath: \"%s\";"+
-		"AfterDateStr: \"%s\";"+
-		"RootPath: \"%s\";"+
-		"SkipDirs: \"%s\";"+
-		"FileName: \"%s\";"+
-		"Keyword: \"%s\";"+
-		"Extension: \"%s\";"+
-		"Size: %t",
-		info.MaxSize, info.OutputPath, info.AfterDateStr, info.RootPath, info.SkipDirs, info.FileName, info.Keyword, info.Extension, info.Size)
 }
 
 func (info *FlagInfo) InitFlag() {
