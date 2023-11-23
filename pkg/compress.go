@@ -109,6 +109,7 @@ func WalkAndCompress(info *option.FlagInfo) {
 	err := filepath.WalkDir(info.RootPath, walker)
 	if err != nil {
 		gologger.Error().Str("err", err.Error()).Msg("Error walking directory")
+		tarGzWriter.Close()
 		utils.DeleteFile(info.OutputPath)
 		return
 	}
