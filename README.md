@@ -15,7 +15,9 @@
 ```shell
 Usage of Fdoc:
   -d string
-        root path to query (global option) (default "c:\\")
+        root path to query (global option) (default UserHome)
+  -e string
+        query files by extension,eg. '-e pdf,doc,zip'
   -f string
         query files by filename (only for QueryByFileName),eg. '-f config  -f config,password,secret'
   -k string
@@ -23,19 +25,24 @@ Usage of Fdoc:
   -max string
         max file size can be zip (global option) (default "1GB")
   -o string
-        zip output path (global option) (default "output.zip")
+        zip output path (global option) (default "output.tar.gz")
   -size
         Calculate total size
   -t string
         only query and pack files after the date,like '2023-10-01' (global option)(default "")
   -x string
-        paths to skip query (global option) (default "C:\\Windows, C:\\Program Files, C:\\Program Files (x86), C:\\inetpub, C:\\Users\\Public")
+        paths to skip query (global option) (default for windows C:\\Windows, C:\\Program Files, C:\\Program Files (x86), C:\\inetpub, C:\\Users\\Public)
 ```
 
-默认进行文件后缀查询
+文件后缀查询
 
-```
-".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv",".pptx", ".ppt", ".zip", ".rar", ".7z", ".tar", ".gz", ".tgz"
+```shell
+"" = 无限制
+all = "pdf,docx,doc,xlsx,xls,csv,pptx,ppt,zip,rar,7z,tar,gz,tgz,bak,bz2,txt";
+documents = "pdf,docx,doc,xlsx,xls,csv,pptx,ppt";
+packages = "zip,rar,7z,tar,gz,tgz,bak,bz2";
+images = "jpg,jpeg,png,gif,bmp";
+videos = "mp4,mkv,avi,mov";
 ```
 
 ```shell
@@ -47,7 +54,7 @@ Fdoc -d C:\test -max 10GB -o output.zip -e pdf #打包C:\test文件夹下所有p
 获取符合条件的文件的总大小
 
 ```shell
-Fdoc -d C:\test --size
+Fdoc -d C:\test -size
 ```
 
 

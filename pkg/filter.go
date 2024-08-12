@@ -40,6 +40,24 @@ func (ff *FileFilter) extFilter(d fs.DirEntry) bool {
 		extensionsMap = map[string]struct{}{
 			".pdf": {}, ".docx": {}, ".doc": {}, ".xlsx": {}, ".xls": {}, ".csv": {},
 			".pptx": {}, ".ppt": {}, ".zip": {}, ".rar": {}, ".7z": {}, ".tar": {}, ".gz": {}, ".tgz": {},
+			".bak": {}, ".bz2": {}, ".txt": {},
+		}
+	} else if ff.info.Extension == "documents" {
+		extensionsMap = map[string]struct{}{
+			".pdf": {}, ".docx": {}, ".doc": {}, ".xlsx": {}, ".xls": {}, ".csv": {},
+			".pptx": {}, ".ppt": {},
+		}
+	} else if ff.info.Extension == "packages" {
+		extensionsMap = map[string]struct{}{
+			".zip": {}, ".rar": {}, ".7z": {}, ".tar": {}, ".gz": {}, ".tgz": {}, ".bak": {}, ".bz2": {},
+		}
+	} else if ff.info.Extension == "images" {
+		extensionsMap = map[string]struct{}{
+			".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {}, ".bmp": {},
+		}
+	} else if ff.info.Extension == "videos" {
+		extensionsMap = map[string]struct{}{
+			".mp4": {}, ".mkv": {}, ".avi": {}, ".mov": {},
 		}
 	}
 	_, ok := extensionsMap[ext]

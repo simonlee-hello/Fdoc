@@ -92,7 +92,7 @@ func WalkAndCompress(info *option.FlagInfo) {
 					gologger.Error().Msgf("Unable to obtain file information %s: %v\n", path, err)
 				}
 				totalSizeBytes = totalSizeBytes + fileInfo.Size()
-				if totalSizeBytes > utils.SizeToBytes(info.MaxSize) {
+				if !info.Size && totalSizeBytes > utils.SizeToBytes(info.MaxSize) {
 					return &OverSizeError{info.MaxSize}
 				}
 				// 打包
