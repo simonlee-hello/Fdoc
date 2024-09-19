@@ -41,20 +41,9 @@ func WalkAndCompress(info *option.FlagInfo) {
 
 		// 检查目录是否需要跳过
 		if d.IsDir() {
-			skip := false
-			if info.SkipDirs != "" {
-				for _, skipDir := range utils.ConvertStringToList(info.SkipDirs) {
-					skipDir = filepath.Join(info.RootPath, skipDir)
-					if strings.Compare(path, skipDir) == 0 {
-						skip = true
-						break
-					}
-				}
-			}
-			if skip {
+			if shouldSkipDir(path, info) {
 				return filepath.SkipDir
 			}
-
 			// 过滤日期
 		} else {
 			// 修改此处，判断是否为符号链接，如果是，递归遍历链接目标
@@ -91,7 +80,7 @@ func WalkAndCompress(info *option.FlagInfo) {
 				if err != nil {
 					gologger.Error().Msgf("Unable to obtain file information %s: %v\n", path, err)
 				}
-				totalSizeBytes = totalSizeBytes + fileInfo.Size()
+				totalSizeBytes += fileInfo.Size()
 				if !info.Size && totalSizeBytes > utils.SizeToBytes(info.MaxSize) {
 					return &OverSizeError{info.MaxSize}
 				}
@@ -130,4 +119,17 @@ func WalkAndCompress(info *option.FlagInfo) {
 		gologger.Info().Str("path", info.OutputPath).Str("size", tarGzSize).Msg("SUCCESS!")
 	}
 	gologger.Info().Msg("Exiting..")
+}
+
+// shouldSkipDir 检查目录是否需要跳过
+func shouldSkipDir(path string, info *option.FlagInfo) bool {
+	if info.SkipDirs != "" {
+		for _, skipDir := range utils.ConvertStringToList(info.SkipDirs) {
+			skipDir = filepath.Join(info.RootPath, skipDir)
+			if strings.Compare(path, skipDir) == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }

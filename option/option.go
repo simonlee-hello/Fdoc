@@ -8,6 +8,7 @@ import (
 	"runtime"
 )
 
+// FlagInfo 结构体定义了所有的命令行参数
 type FlagInfo struct {
 	MaxSize      string
 	OutputPath   string
@@ -20,18 +21,38 @@ type FlagInfo struct {
 	Size         bool
 }
 
+// InitFlag 初始化命令行参数
 func (info *FlagInfo) InitFlag() {
 	info.GetFlag()
-	// 初始化RootPath
+	info.initRootPath()
+	info.checkDirectory(info.RootPath, "目录不存在!")
+	info.checkFileExistence(info.OutputPath, "输出 tar.gz 文件已存在，请重命名 tarGzPath")
+	info.logDebugInfo()
+}
+
+// GetFlag 获取命令行参数
+func (info *FlagInfo) GetFlag() {
+	flag.StringVar(&info.MaxSize, "max", "1GB", "最大文件大小 (全局选项)")
+	flag.StringVar(&info.OutputPath, "o", "output.tar.gz", "压缩输出路径 (全局选项)")
+	flag.StringVar(&info.AfterDateStr, "t", "", "仅查询并打包指定日期之后的文件，例如 '2023-10-01' (全局选项)(默认 \"\")")
+	flag.StringVar(&info.RootPath, "d", "", "查询的根路径 (全局选项)")
+	flag.StringVar(&info.SkipDirs, "x", "", "跳过查询的路径 (全局选项)")
+	flag.StringVar(&info.FileName, "f", "", "按文件名查询文件 (仅用于 QueryByFileName)，例如 '-f config  -f config,password,secret'")
+	flag.StringVar(&info.Keyword, "k", "", "按关键字查询文件内容 (仅用于 QueryByKeyword)，例如 '-k config -k password:,secret:,token:'")
+	flag.StringVar(&info.Extension, "e", "", "按扩展名查询文件，例如 '-e pdf,doc,zip'")
+	flag.BoolVar(&info.Size, "size", false, "计算总大小")
+	flag.Parse()
+}
+
+// initRootPath 初始化根路径
+func (info *FlagInfo) initRootPath() {
 	if info.RootPath == "" {
-		// 获取当前用户的信息
 		currentUser, err := user.Current()
 		if err != nil {
-			gologger.Warning().Msgf("Unable to obtain current user information:%v\n", err)
+			gologger.Warning().Msgf("无法获取当前用户信息:%v\n", err)
 		}
-		// 获取家目录
 		homeDir := currentUser.HomeDir
-		gologger.Debug().Msgf("current user home path : %s\n", homeDir)
+		gologger.Debug().Msgf("当前用户家目录 : %s\n", homeDir)
 
 		switch runtime.GOOS {
 		case "windows":
@@ -41,21 +62,28 @@ func (info *FlagInfo) InitFlag() {
 			}
 		case "linux", "darwin":
 			info.RootPath = homeDir
-
 		}
 	}
-	// 检查目录是否存在
-	_, dirErr := os.Stat(info.RootPath)
-	if dirErr != nil {
-		gologger.Error().Str("dir", info.RootPath).Msg("Directory does not exist!")
+}
+
+// checkDirectory 检查目录是否存在
+func (info *FlagInfo) checkDirectory(path string, errMsg string) {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		gologger.Error().Str("dir", path).Msg(errMsg)
 		os.Exit(0)
 	}
-	// 先判断输出文件路径是否存在
-	_, OutputPathExistErr := os.Stat(info.OutputPath)
-	if OutputPathExistErr == nil {
-		gologger.Error().Str("tarGzPath", info.OutputPath).Msg("output tar.gz file exists, please rename tarGzPath")
+}
+
+// checkFileExistence 检查文件是否存在
+func (info *FlagInfo) checkFileExistence(path string, errMsg string) {
+	if _, err := os.Stat(path); err == nil {
+		gologger.Error().Str("tarGzPath", path).Msg(errMsg)
 		os.Exit(0)
 	}
+}
+
+// logDebugInfo 记录调试信息
+func (info *FlagInfo) logDebugInfo() {
 	gologger.Debug().Str("MaxSize", info.MaxSize).Msg("")
 	gologger.Debug().Str("OutputPath", info.OutputPath).Msg("")
 	gologger.Debug().Str("AfterDateStr", info.AfterDateStr).Msg("")
@@ -64,24 +92,4 @@ func (info *FlagInfo) InitFlag() {
 	gologger.Debug().Str("FileName", info.FileName).Msg("")
 	gologger.Debug().Str("Keyword", info.Keyword).Msg("")
 	gologger.Debug().Str("Extension", info.Extension).Msg("")
-}
-
-func (info *FlagInfo) GetFlag() {
-
-	//flag.StringVar(&info.MaxSize, "maxSize", "1GB", "max file size can be zip")
-	flag.StringVar(&info.MaxSize, "max", "1GB", "max file size can be zip (global option)")
-	//flag.StringVar(&info.OutputPath, "zipPath", "output.zip", "zip output path")
-	flag.StringVar(&info.OutputPath, "o", "output.tar.gz", "zip output path (global option)")
-	//flag.StringVar(&info.AfterDateStr, "afterDateStr", "", "only query and pack the \"AfterDate\" file,Date in the format '2006-01-02'")
-	flag.StringVar(&info.AfterDateStr, "t", "", "only query and pack files after the date,like '2023-10-01' (global option)(default \"\")")
-	//flag.StringVar(&info.RootPath, "rootPath", "c:\\", "root path to query")
-	flag.StringVar(&info.RootPath, "d", "", "root path to query (global option)")
-	//flag.StringVar(&info.SkipDirs, "skipDirs", "C:\\Windows, C:\\Program Files, C:\\Program Files (x86), C:\\inetpub, C:\\Users\\Public", "paths to skip query")
-	flag.StringVar(&info.SkipDirs, "x", "", "paths to skip query (global option)")
-	flag.StringVar(&info.FileName, "f", "", "query files by filename (only for QueryByFileName),eg. '-f config  -f config,password,secret'")
-	flag.StringVar(&info.Keyword, "k", "", "query files in content by keyword (only for QueryByKeyword),eg. '-k config -k password:,secret:,token:'")
-	flag.StringVar(&info.Extension, "e", "", "query files by extension,eg. '-e pdf,doc,zip'")
-	flag.BoolVar(&info.Size, "size", false, "Calculate total size")
-
-	flag.Parse()
 }

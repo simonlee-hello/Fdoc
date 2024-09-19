@@ -72,6 +72,7 @@ func (tw *TarGzWriter) Close() error {
 	return nil
 }
 
+// FileToTarGz 将文件添加到 tar.gz 归档中
 func FileToTarGz(filePath string, rootDir string, tarWriter *tar.Writer) {
 	file, err := os.Open(filePath)
 	if err != nil {

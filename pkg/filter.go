@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// 文件过滤器
+// FileFilter 文件过滤器结构体
 type FileFilter struct {
-	info *option.FlagInfo
+	info *option.FlagInfo // 命令行参数信息
 }
 
 // NewFileFilter 创建一个新的文件过滤器
@@ -23,12 +23,12 @@ func NewFileFilter(info *option.FlagInfo) *FileFilter {
 	return &FileFilter{info: info}
 }
 
-// 过滤文件
+// Filter 过滤文件，根据多个条件进行过滤
 func (ff *FileFilter) Filter(path string, d fs.DirEntry) bool {
 	return ff.dateFilter(d) && ff.filenameFilter(d) && ff.keywordFilter(path) && ff.extFilter(d)
 }
 
-// 根据后缀进行过滤
+// extFilter 根据文件后缀进行过滤
 func (ff *FileFilter) extFilter(d fs.DirEntry) bool {
 	if ff.info.Extension == "" {
 		return true
@@ -64,7 +64,7 @@ func (ff *FileFilter) extFilter(d fs.DirEntry) bool {
 	return ok
 }
 
-// 如果有日期限制，检查修改时间是否在指定日期之后
+// dateFilter 根据文件修改时间进行过滤
 func (ff *FileFilter) dateFilter(d fs.DirEntry) bool {
 	if ff.info.AfterDateStr == "" {
 		return true
