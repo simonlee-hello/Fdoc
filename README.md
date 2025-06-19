@@ -10,7 +10,7 @@
 
 -[x] 增加只对指定目录压缩的功能 -d 就是指定目录；-f就是指定文件；-k就是文件内容；-e就是后缀
 -[x] 增加模式选项：1、指定目录压缩；2、后缀压缩；3、近似文件名压缩；4、近似内容
--[ ] 文件多时，会栈溢出，需要边爬取文件边进行打包
+-[x] 文件多时，会栈溢出，需要边爬取文件边进行打包
 
 ## 使用说明
 
@@ -50,6 +50,15 @@ videos = "mp4,mkv,avi,mov";
 ```
 
 ### 示例
+
+#### 打包指定目录下所有文件（默认）
+
+```shell
+# 默认打包用户家目录(windows: C:\Users\YourUsername, Linux: /home/YourUsername)
+# 默认打包所有文件，大小限制为1GB，输出文件为output_<timestamp>.tar.gz
+# 默认跳过系统目录(Windows: C:\Windows, C:\Program Files, C:\Program Files (x86), C:\inetpub, C:\Users\Public)
+Fdoc
+```
 
 #### 打包指定目录下所有文件
 

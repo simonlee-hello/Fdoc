@@ -47,7 +47,7 @@ func (ff *FileFilter) extFilter(d fs.DirEntry) bool {
 			".pdf": {}, ".docx": {}, ".doc": {}, ".xlsx": {}, ".xls": {}, ".csv": {},
 			".pptx": {}, ".ppt": {},
 		}
-	} else if ff.info.Extension == "packages" {
+	} else if ff.info.Extension == "archives" {
 		extensionsMap = map[string]struct{}{
 			".zip": {}, ".rar": {}, ".7z": {}, ".tar": {}, ".gz": {}, ".tgz": {}, ".bak": {}, ".bz2": {},
 		}
@@ -108,20 +108,19 @@ func (ff *FileFilter) keywordFilter(path string) bool {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		// 将文件内容转换为小写，然后进行比较
-		if strings.Contains(strings.ToLower(line), strings.ToLower(ff.info.Keyword)) {
+	reader := bufio.NewReader(file)
+	keyword := strings.ToLower(ff.info.Keyword)
+	for {
+		line, err := reader.ReadString('\n')
+		if strings.Contains(strings.ToLower(line), keyword) {
 			return true
 		}
+		if err != nil {
+			if err.Error() != "EOF" {
+				gologger.Error().Msgf("error when reading file：%v", err)
+			}
+			break
+		}
 	}
-
-	if err := scanner.Err(); err != nil {
-		gologger.Error().Msgf("error when reading file：%v", err)
-		return false
-	}
-
 	return false
 }

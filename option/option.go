@@ -2,10 +2,12 @@ package option
 
 import (
 	"flag"
+	"fmt"
 	"github.com/projectdiscovery/gologger"
 	"os"
 	"os/user"
 	"runtime"
+	"time"
 )
 
 // FlagInfo 结构体定义了所有的命令行参数
@@ -33,15 +35,20 @@ func (info *FlagInfo) InitFlag() {
 // GetFlag 获取命令行参数
 func (info *FlagInfo) GetFlag() {
 	flag.StringVar(&info.MaxSize, "max", "1GB", "最大文件大小 (全局选项)")
-	flag.StringVar(&info.OutputPath, "o", "output.tar.gz", "压缩输出路径 (全局选项)")
+	flag.StringVar(&info.OutputPath, "o", "", "压缩输出路径 (全局选项)")
 	flag.StringVar(&info.AfterDateStr, "t", "", "仅查询并打包指定日期之后的文件，例如 '2023-10-01' (全局选项)(默认 \"\")")
 	flag.StringVar(&info.RootPath, "d", "", "查询的根路径 (全局选项)")
 	flag.StringVar(&info.SkipDirs, "x", "", "跳过查询的路径 (全局选项)")
 	flag.StringVar(&info.FileName, "f", "", "按文件名查询文件 (仅用于 QueryByFileName)，例如 '-f config  -f config,password,secret'")
 	flag.StringVar(&info.Keyword, "k", "", "按关键字查询文件内容 (仅用于 QueryByKeyword)，例如 '-k config -k password:,secret:,token:'")
-	flag.StringVar(&info.Extension, "e", "", "按扩展名查询文件，例如 '-e pdf,doc,zip'")
+	flag.StringVar(&info.Extension, "e", "", "按扩展名查询文件，例如 '-e pdf,doc,zip'. 也有组合可选: all, documents, archives, images, videos")
 	flag.BoolVar(&info.Size, "size", false, "计算总大小")
 	flag.Parse()
+
+	// 设置输出默认值
+	if info.OutputPath == "" {
+		info.OutputPath = fmt.Sprintf("output_%s.tar.gz", time.Now().Format("20060102_150405"))
+	}
 }
 
 // initRootPath 初始化根路径

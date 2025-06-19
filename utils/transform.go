@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"github.com/projectdiscovery/gologger"
 	"strconv"
 	"strings"
 )
@@ -15,7 +16,7 @@ func SizeToBytes(maxsize string) int64 {
 	numStr := maxsize
 	unit := ""
 	for i, char := range maxsize {
-		if char < '0' || char > '9' {
+		if (char < '0' || char > '9') && char != '.' {
 			numStr = maxsize[:i]
 			unit = maxsize[i:]
 			break
@@ -30,14 +31,15 @@ func SizeToBytes(maxsize string) int64 {
 
 	// 根据单位转换为字节
 	switch unit {
-	case "KB":
+	case "K", "KB":
 		return int64(num * 1024)
-	case "MB":
+	case "M", "MB":
 		return int64(num * 1024 * 1024)
-	case "GB":
+	case "G", "GB":
 		return int64(num * 1024 * 1024 * 1024)
 	default:
 		// 默认情况下，认为是字节
+		gologger.Warning().Msgf("未识别的单位 '%s'，默认使用字节单位", unit)
 		return int64(num)
 	}
 }
