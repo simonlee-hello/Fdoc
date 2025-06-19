@@ -1,0 +1,65 @@
+name: Release Binary
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o Fdoc-windows-amd64.exe .
+          GOOS=linux GOARCH=amd64 go build -o Fdoc-linux-amd64 .
+          GOOS=darwin GOARCH=amd64 go build -o Fdoc-darwin-amd64 .
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Windows Binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./Fdoc-windows-amd64.exe
+          asset_name: Fdoc-windows-amd64.exe
+          asset_content_type: application/octet-stream
+
+      - name: Upload Linux Binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./Fdoc-linux-amd64
+          asset_name: Fdoc-linux-amd64
+          asset_content_type: application/octet-stream
+
+      - name: Upload macOS Binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./Fdoc-darwin-amd64
+          asset_name: Fdoc-darwin-amd64
+          asset_content_type: application/octet-stream
