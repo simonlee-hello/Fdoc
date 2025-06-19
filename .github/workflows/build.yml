@@ -1,0 +1,36 @@
+name: Build Binary
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o Fdoc-windows-amd64.exe .
+          GOOS=linux GOARCH=amd64 go build -o Fdoc-linux-amd64 .
+          GOOS=darwin GOARCH=amd64 go build -o Fdoc-darwin-amd64 .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fdoc-binaries
+          path: |
+            Fdoc-windows-amd64.exe
+            Fdoc-linux-amd64
+            Fdoc-darwin-amd64
