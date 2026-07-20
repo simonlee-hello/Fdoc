@@ -26,6 +26,55 @@ Static binaries for Linux, Windows, and macOS.
 
 > Symlinks are skipped to avoid cycles and permission issues.
 
+## Flow
+
+### Overview
+
+```mermaid
+flowchart LR
+  A[Parse flags] --> B[Scan filter pack]
+  B --> C{-upload?}
+  C -->|no| D([Local done])
+  C -->|yes| E[Optional encrypt upload]
+  E --> F{Callback?}
+  F -->|none| G[Print URL on stdout]
+  F -->|webhook/dns| H[Webhook first else DNS]
+  G --> I{-scrub?}
+  H --> I
+  I -->|yes| J[Delete archive and self]
+  I -->|no| K([Exit])
+  J --> K
+```
+
+### Per-file filter
+
+Unset filters are treated as pass. Conditions combine with **AND**; comma lists inside one flag are **OR**.
+
+```mermaid
+flowchart TD
+  A[Take one path] --> B{Dir and hit -x?}
+  B -->|yes| Z1[Skip]
+  B -->|no| C{Regular file not symlink?}
+  C -->|no| Z1
+  C -->|yes| D[-e extension]
+  D -->|fail| Z1
+  D -->|pass| E[-f filename]
+  E -->|fail| Z1
+  E -->|pass| F[-t mtime date]
+  F -->|fail| Z1
+  F -->|pass| G[-k / -keyword content]
+  G -->|fail| Z1
+  G -->|pass| H{-max-file exceeded?}
+  H -->|yes| Z1
+  H -->|no| I{-max would exceed?}
+  I -->|yes| Z2[Truncate: stop further walk]
+  I -->|no| J{-size?}
+  J -->|yes| Z3[Count size]
+  J -->|no| Z4[Append to tgz]
+```
+
+Defaults: `-e documents`; OS-specific `-x`. Hitting `-max` keeps the partial archive (exit 2).
+
 ## Usage
 
 ```text
