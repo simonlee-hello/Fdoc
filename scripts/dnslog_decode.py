@@ -34,8 +34,8 @@ LABEL_RE = re.compile(
 )
 
 
-def extract_parts(text: str) -> dict[str, dict[int, str]]:
-    """task_id -> {seq: chunk}. Also records expected total per task."""
+def extract_parts(text: str) -> tuple[dict[str, dict[int, str]], dict[str, int]]:
+    """Return (task_id -> {seq: chunk}, task_id -> total)."""
     by_task: dict[str, dict[int, str]] = defaultdict(dict)
     totals: dict[str, int] = {}
 
@@ -58,9 +58,7 @@ def extract_parts(text: str) -> dict[str, dict[int, str]]:
                 )
             totals[task] = total
 
-    # stash totals on a side channel via attribute
-    extract_parts.totals = totals  # type: ignore[attr-defined]
-    return by_task
+    return by_task, totals
 
 
 def b32decode_nopad(s: str) -> bytes:
@@ -111,8 +109,7 @@ def main() -> int:
                 chunks.append(item)
 
     text = "\n".join(chunks)
-    by_task = extract_parts(text)
-    totals: dict[str, int] = getattr(extract_parts, "totals", {})
+    by_task, totals = extract_parts(text)
 
     if not by_task:
         print("no Fdoc DNS chunks found", file=sys.stderr)

@@ -13,8 +13,14 @@ func Upload(files []string, backend BaseBackend) error {
 	tmpOut := os.Stdout
 	if MuteMode {
 		transferConfig.NoBarMode = true
-		os.Stdout, _ = os.Open(os.DevNull)
-		defer func() { os.Stdout = tmpOut }()
+		devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+		if err == nil {
+			os.Stdout = devNull
+			defer func() {
+				os.Stdout = tmpOut
+				_ = devNull.Close()
+			}()
+		}
 	}
 
 	var (

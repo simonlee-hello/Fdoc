@@ -6,9 +6,13 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"uploader/apis"
 )
+
+// sessionMu serializes probe+upload: Mute/TransferConfig/Stdout/SizeHint are process-global.
+var sessionMu sync.Mutex
 
 // needsFullUpload is true when apis.Upload must run (zip dir, -r walk, encrypt key normalize).
 // Plain single-file uploads can use UploadFile so library callers get a returned link.
@@ -36,24 +40,33 @@ type Options struct {
 	Mute    bool
 	Encrypt bool
 	Key     string
+	// RecursiveDirs uploads each file under a directory (no zip). Default false.
+	RecursiveDirs bool
 	// OnSuccess is called with the backend name after a successful upload (e.g. save last-backend).
 	OnSuccess func(backendName string)
 }
 
 // UploadAuto uploads a single file. When opts.Backend is empty, probes and failovers by file size.
 // Returns the download link and the backend name that succeeded.
+// Not safe for concurrent calls in the same process.
 func UploadAuto(path string, opts Options) (link, backendName string, err error) {
 	return UploadWithOptions([]string{path}, opts)
 }
 
 // UploadWithOptions uploads one or more paths with auto or pinned backend selection.
+// Not safe for concurrent calls in the same process.
 func UploadWithOptions(files []string, opts Options) (link, backendName string, err error) {
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+
 	oldQuiet, oldMute := apis.QuietMode, apis.MuteMode
 	oldCfg := *apis.TransferConfig()
+	oldHint := apis.SizeHint
 	defer func() {
 		apis.QuietMode = oldQuiet
 		apis.MuteMode = oldMute
 		*apis.TransferConfig() = oldCfg
+		apis.SizeHint = oldHint
 	}()
 
 	apis.QuietMode = opts.Quiet
@@ -62,6 +75,7 @@ func UploadWithOptions(files []string, opts Options) (link, backendName string, 
 	cfg.NoBarMode = opts.Mute || opts.Quiet
 	cfg.CryptoMode = opts.Encrypt
 	cfg.CryptoKey = opts.Key
+	cfg.RecursiveDirs = opts.RecursiveDirs
 
 	maxSize, err := EstimateMaxSize(files)
 	if err != nil {
@@ -100,19 +114,22 @@ func UploadWithOptions(files []string, opts Options) (link, backendName string, 
 			fmt.Fprintf(os.Stderr, "retry backend %s...\n", info.Name)
 		}
 		setupUploadFor(info)
+		link = ""
 		// Prefer apis.Upload for dir zip / recursive / encrypt (UploadFile skips those).
 		// Plain single files keep UploadFile so Mute library callers get a returned link.
-		// Single-path Mute + full Upload: capture stdout so Encrypt/dir also return a link
-		// (Fdoc and other embedders rely on the return value, not printed stdout).
 		if needsFullUpload(files) {
 			if apis.MuteMode && len(files) == 1 && !apis.TransferConfig().RecursiveDirs {
 				link, lastErr = uploadMutedCapture(files, info.Backend)
 			} else {
 				lastErr = apis.Upload(files, info.Backend)
-				link = "" // multi / verbose: links printed by Upload when MuteMode
+				// multi / verbose: links printed by Upload when MuteMode; library Mute
+				// callers should use single-file paths so capture/UploadFile return a link.
 			}
 		} else {
 			link, lastErr = uploadFileQuiet(files[0], info.Backend, apis.MuteMode)
+		}
+		if lastErr == nil && link == "" && apis.MuteMode {
+			lastErr = fmt.Errorf("upload succeeded but empty download link")
 		}
 		if lastErr == nil {
 			if opts.OnSuccess != nil {
@@ -152,7 +169,7 @@ func uploadFileQuiet(path string, backend apis.BaseBackend, mute bool) (string, 
 func uploadMutedCapture(files []string, backend apis.BaseBackend) (string, error) {
 	r, w, err := os.Pipe()
 	if err != nil {
-		return "", apis.Upload(files, backend)
+		return "", fmt.Errorf("capture pipe: %w", err)
 	}
 	old := os.Stdout
 	os.Stdout = w
@@ -167,7 +184,14 @@ func uploadMutedCapture(files []string, backend apis.BaseBackend) (string, error
 	_ = w.Close()
 	os.Stdout = old
 	out := <-done
-	return lastHTTPURL(out), upErr
+	link := lastHTTPURL(out)
+	if upErr != nil {
+		return link, upErr
+	}
+	if link == "" {
+		return "", fmt.Errorf("upload succeeded but empty download link")
+	}
+	return link, nil
 }
 
 func lastHTTPURL(s string) string {

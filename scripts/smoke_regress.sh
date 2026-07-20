@@ -163,17 +163,21 @@ else
   bad "callback package smoke"
 fi
 
-step "7) scrub removes archive (no self-delete in CI)"
-# Unit-level scrub already covered; CLI scrub needs successful upload+callback.
-# Here we only re-check scrub package + ensure -scrub alone without upload does not run in main
-# (main only scrubs after upload+callback). Pack-only with -scrub should leave archive.
-rm -f "$OUT/keep-scrub.tar.gz"
-"$BIN" -d "$SRC" -x skipme -o "$OUT/keep-scrub.tar.gz" -scrub -q || true
-if [[ -f "$OUT/keep-scrub.tar.gz" ]]; then
-  ok "pack-only -scrub does not delete archive (no upload path)"
-else
-  bad "archive vanished unexpectedly with pack-only -scrub"
-fi
+step "7) scrub flag validation"
+set +e
+err="$("$BIN" -d "$SRC" -x skipme -o "$OUT/scrub-only.tar.gz" -scrub -q 2>&1)"
+ec=$?
+set -e
+assert_eq 1 "$ec" "-scrub without -upload exits 1"
+assert_contains "$err" "-upload" "error mentions -upload"
+
+step "7b) webhook http non-loopback rejected"
+set +e
+err="$("$BIN" -d "$SRC" -x skipme -o "$OUT/bad-wh.tar.gz" -upload -webhook http://example.com/h -q 2>&1)"
+ec=$?
+set -e
+assert_eq 1 "$ec" "non-loopback http webhook rejected"
+assert_contains "$err" "https" "error mentions https"
 
 step "8) online upload smoke (optional ONLINE=1)"
 if [[ "$ONLINE" == "1" ]]; then

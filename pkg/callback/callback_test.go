@@ -65,9 +65,17 @@ func TestNotifyWebhookOK(t *testing.T) {
 	}
 }
 
+func TestNotifyWebhookRejectsNonLoopbackHTTP(t *testing.T) {
+	_, err := Notify(context.Background(), Payload{
+		TaskID: "t1", Host: "h", URL: "https://example.com/f",
+	}, Options{Webhook: "http://example.com/hook", Timeout: time.Second})
+	if err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("expected https requirement, got %v", err)
+	}
+}
+
 func TestNotifyWebhookFailDNSConfigured(t *testing.T) {
-	// Webhook returns 500; DNS base is invalid for real lookup but sendDNS
-	// still counts resolver errors as best-effort success.
+	// Webhook 500; DNS to *.invalid usually NXDOMAIN → counts as query sent for all chunks.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -79,16 +87,27 @@ func TestNotifyWebhookFailDNSConfigured(t *testing.T) {
 		URL:    "https://example.com/f",
 	}, Options{
 		Webhook: srv.URL,
-		DNS:     "invalid.invalid",
-		Timeout: 2 * time.Second,
+		DNS:     "invalid",
+		Timeout: 5 * time.Second,
 	})
 	if err != nil {
-		t.Fatalf("expected dns failover success, got %v", err)
+		t.Fatalf("expected dns failover success (NXDOMAIN), got %v", err)
 	}
 	if res.WebhookOK {
 		t.Fatal("webhook should fail")
 	}
 	if !res.DNSOK {
-		t.Fatal("dns should succeed best-effort")
+		t.Fatal("dns should succeed when all chunks get NXDOMAIN/answer")
+	}
+}
+
+func TestSendDNSRejectsEmptyTask(t *testing.T) {
+	err := sendDNS(context.Background(), "example.com", Payload{
+		TaskID: "!!!",
+		Host:   "h",
+		URL:    "https://x",
+	})
+	if err == nil || !strings.Contains(err.Error(), "sanitize") {
+		t.Fatalf("got %v", err)
 	}
 }

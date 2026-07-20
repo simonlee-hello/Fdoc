@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"os/user"
 	"runtime"
@@ -78,10 +79,20 @@ func (info *FlagInfo) validateFlags() {
 		logx.Error("-upload cannot be used with -size")
 		os.Exit(1)
 	}
+	if info.Scrub && !info.Upload {
+		logx.Error("-scrub requires -upload (cleanup runs only after successful upload+callback)")
+		os.Exit(1)
+	}
 	if info.Upload {
 		if info.Webhook == "" && info.DNS == "" {
 			logx.Error("-upload requires -webhook and/or -dns for result callback")
 			os.Exit(1)
+		}
+		if info.Webhook != "" {
+			if err := validateWebhookURL(info.Webhook); err != nil {
+				logx.Error("%v", err)
+				os.Exit(1)
+			}
 		}
 	}
 	if info.Encrypt && info.EncryptKey == "" {
@@ -91,17 +102,57 @@ func (info *FlagInfo) validateFlags() {
 	if info.CBTimeout <= 0 {
 		info.CBTimeout = 15 * time.Second
 	}
-	if info.Upload && info.TaskID == "" {
-		info.TaskID = genTaskID()
+	if info.Upload {
+		if info.TaskID == "" {
+			info.TaskID = genTaskID()
+		}
+		if sanitizeTaskID(info.TaskID) == "" {
+			logx.Error("invalid -task-id %q (need [a-z0-9-])", info.TaskID)
+			os.Exit(1)
+		}
 	}
 }
 
 func genTaskID() string {
-	var b [4]byte
+	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("t%d", time.Now().UnixNano()%1e9)
+		return fmt.Sprintf("t%d", time.Now().UnixNano()%1e12)
 	}
 	return hex.EncodeToString(b[:])
+}
+
+func sanitizeTaskID(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	out := b.String()
+	if len(out) > 40 {
+		out = out[:40]
+	}
+	return out
+}
+
+func validateWebhookURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid -webhook: %w", err)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return nil
+	case "http":
+		h := strings.ToLower(u.Hostname())
+		if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+			return nil
+		}
+		return fmt.Errorf("-webhook must use https (http only allowed for loopback)")
+	default:
+		return fmt.Errorf("-webhook must use https")
+	}
 }
 
 // GetFlag registers and parses CLI flags.
@@ -177,7 +228,8 @@ Notes:
   Inaccessible paths are skipped quietly; count is shown in the final summary (-v lists each).
   -upload defaults to auto backend selection by archive size; -b pins a backend.
   -webhook is an HTTPS URL that accepts POST JSON; -dns is a DNSLog base domain.
-  -scrub runs only after successful upload+callback; omit it to keep local files.
+  -scrub requires -upload; runs only after fully successful callback; omit it to keep local files.
+  -webhook must be https (http allowed only for loopback).
 
 `)
 	fmt.Fprintf(out, "Usage of %s:\n", os.Args[0])

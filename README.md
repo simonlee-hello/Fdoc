@@ -118,7 +118,9 @@ Example input line:
 
 Requires all chunks `0`..`total-1` for the same `task_id`. Missing a chunk exits with an error.
 
-`-scrub` only runs when upload **and** at least one callback channel succeed. Omit `-scrub` to keep the archive and binary.
+Runtime DNS callback also requires **every** chunk query to leave the host (NXDOMAIN counts; per-chunk timeout does not). Partial DNS success is treated as callback failure.
+
+`-scrub` requires `-upload`, and runs only after a fully successful callback (webhook 2xx, or all DNS chunks sent). `-webhook` must be `https://` (or `http://` to loopback for local tests). Omit `-scrub` to keep the archive and binary.
 
 On Unix, `-upload` ignores `SIGHUP` so a dead parent session is less likely to kill the process mid-flight.
 

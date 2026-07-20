@@ -27,6 +27,7 @@ type ProbeResult struct {
 var SetupBackend func(name string)
 
 // ProbeRankedForUpload probes size-fitting backends and returns them sorted by latency.
+// Probes run serially: backends share global Mute/TransferConfig/Stdout state.
 func ProbeRankedForUpload(maxSize int64, force bool) ([]*BackendInfo, error) {
 	targets := SelectProbeTargetsForSize(maxSize, force)
 	if len(targets) == 0 {
@@ -38,7 +39,8 @@ func ProbeRankedForUpload(maxSize int64, force bool) ([]*BackendInfo, error) {
 		fmt.Fprintf(os.Stderr, "auto: probing %d backend(s) (size ≤ %s)...\n", len(targets), formatProbeSize(maxSize))
 	}
 
-	results, err := ProbeAll(targets, 3, 45*time.Second, !quiet)
+	// parallel=1: probeMu + global apis state are not safe for concurrent probes.
+	results, err := ProbeAll(targets, 1, 45*time.Second, !quiet)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +135,7 @@ func SelectProbeTargetsForSize(maxSize int64, force bool) []BackendInfo {
 	return out
 }
 
-// ProbeAll probes targets concurrently.
+// ProbeAll probes targets. parallel>1 is capped by probeMu (global state); prefer 1.
 func ProbeAll(targets []BackendInfo, parallel int, timeout time.Duration, printLive bool) ([]ProbeResult, error) {
 	if parallel < 1 {
 		parallel = 1
@@ -233,6 +235,12 @@ func probeOne(info BackendInfo, file string, timeout time.Duration) ProbeResult 
 	case <-timer.C:
 		res.Latency = timeout
 		res.Err = fmt.Sprintf("timeout >%.0fs", timeout.Seconds())
+		// Must join the in-flight probe so probeMu is released and globals restored
+		// before ProbeAll returns / real upload starts.
+		out := <-ch
+		if out.err != nil && res.Err == "" {
+			res.Err = TruncateErr(out.err.Error(), 72)
+		}
 		return res
 	case out := <-ch:
 		res.Latency = out.latency
@@ -251,12 +259,14 @@ func probeUpload(info BackendInfo, file string) (string, error) {
 	oldOut := apis.Output
 	oldCfg := *apis.TransferConfig()
 	oldStdout := os.Stdout
+	oldHint := apis.SizeHint
 	defer func() {
 		apis.MuteMode = oldMute
 		apis.DebugMode = oldDebug
 		apis.Output = oldOut
 		*apis.TransferConfig() = oldCfg
 		os.Stdout = oldStdout
+		apis.SizeHint = oldHint
 	}()
 
 	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
