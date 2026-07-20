@@ -255,10 +255,134 @@ func TestWalk_NoMatchDeletesEmptyArchive(t *testing.T) {
 	}
 }
 
+func TestWalk_FollowsSymlinkToRegularFile(t *testing.T) {
+	outer := t.TempDir()
+	root := filepath.Join(outer, "scan")
+	if err := os.Mkdir(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Target outside walk root so only the symlink is visited.
+	target := filepath.Join(outer, "real.pdf")
+	payload := []byte("%PDF-1.4 symlink-target-content")
+	if err := os.WriteFile(target, payload, 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "alias.pdf")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink not available: %v", err)
+	}
+
+	out := filepath.Join(t.TempDir(), "out.tgz")
+	info := &option.FlagInfo{
+		RootPath:    root,
+		OutputPath:  out,
+		Extension:   "pdf",
+		MaxSize:     "1GB",
+		MaxFileSize: "0",
+	}
+	result := WalkAndCompress(info)
+	if result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	if result.MatchedFiles != 1 {
+		t.Fatalf("matched=%d want 1", result.MatchedFiles)
+	}
+	names := tarMemberNames(t, out)
+	foundLink := false
+	for _, n := range names {
+		if strings.Contains(n, "alias.pdf") {
+			foundLink = true
+		}
+	}
+	if !foundLink {
+		t.Fatalf("expected alias.pdf in archive, got %v", names)
+	}
+	got := tarMemberContent(t, out, "alias.pdf")
+	if string(got) != string(payload) {
+		t.Fatalf("packed content=%q want target payload", got)
+	}
+}
+
+func TestWalk_SkipsSymlinkToDir(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "subdir")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hidden.pdf"), []byte("%PDF-1.4 in-dir"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "todir")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Skipf("symlink not available: %v", err)
+	}
+
+	out := filepath.Join(t.TempDir(), "out.tgz")
+	info := &option.FlagInfo{
+		RootPath:    root,
+		OutputPath:  out,
+		Extension:   "pdf",
+		MaxSize:     "1GB",
+		MaxFileSize: "0",
+	}
+	result := WalkAndCompress(info)
+	if result.Err != nil {
+		t.Fatal(result.Err)
+	}
+	// WalkDir does not enter symlink dirs; symlink-to-dir is not a regular file.
+	for _, n := range tarMemberNames(t, out) {
+		if strings.Contains(n, "hidden.pdf") && strings.Contains(n, "todir") {
+			t.Fatalf("must not pack via symlink dir: %v", n)
+		}
+	}
+	// Real path under subdir should still be packed.
+	found := false
+	for _, n := range tarMemberNames(t, out) {
+		if strings.Contains(n, "hidden.pdf") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected subdir/hidden.pdf packed, got %v", tarMemberNames(t, out))
+	}
+}
+
 func countTarMembers(t *testing.T, path string) int {
 	t.Helper()
 	return len(tarMemberNames(t, path))
 }
+
+func tarMemberContent(t *testing.T, archive, wantSuffix string) []byte {
+	t.Helper()
+	f, err := os.Open(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			t.Fatalf("member ending with %q not found", wantSuffix)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasSuffix(hdr.Name, wantSuffix) {
+			b, err := io.ReadAll(tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return b
+		}
+	}
+}
+
 
 func tarMemberNames(t *testing.T, path string) []string {
 	t.Helper()

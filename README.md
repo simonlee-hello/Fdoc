@@ -24,7 +24,7 @@ Static binaries for Linux, Windows, and macOS.
 - `-scrub`: after successful upload (+ callback if configured), delete archive and self binary
 - `-encrypt`: encrypt stream before upload (requires `-upload` + `-key`)
 
-> Symlinks are skipped to avoid cycles and permission issues.
+> File symlinks are followed (target content packed under the link name). Directory symlinks are not entered. Windows `.lnk` shortcuts are not resolved—treated as regular files if `-e` matches.
 
 ## Flow
 
@@ -54,7 +54,7 @@ Unset filters are treated as pass. Conditions combine with **AND**; comma lists 
 flowchart TD
   A[Take one path] --> B{Dir and hit -x?}
   B -->|yes| Z1[Skip]
-  B -->|no| C{Regular file not symlink?}
+  B -->|no| C{Regular file or followable file symlink?}
   C -->|no| Z1
   C -->|yes| D[-e extension]
   D -->|fail| Z1

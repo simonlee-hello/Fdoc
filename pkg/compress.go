@@ -111,15 +111,12 @@ func WalkAndCompress(info *option.FlagInfo) RunResult {
 			return nil
 		}
 
-		if d.Type()&fs.ModeSymlink != 0 {
-			return nil
-		}
 		if utils.SamePath(path, outputAbs) {
 			logx.Debug("skip output archive itself: %s", path)
 			return nil
 		}
 
-		// Stat/regular-file check before Filter so -k never opens FIFOs/devices.
+		// Lstat first so we can tell symlinks apart from other non-regular nodes.
 		fileInfo, err := os.Lstat(path)
 		if err != nil {
 			if utils.IsAccessDenied(err) {
@@ -129,7 +126,20 @@ func WalkAndCompress(info *option.FlagInfo) RunResult {
 			}
 			return nil
 		}
-		if !fileInfo.Mode().IsRegular() {
+		if fileInfo.Mode()&os.ModeSymlink != 0 {
+			// Follow symlink like a normal open/Stat: pack target content under the
+			// link's path name. Skip broken links and symlinks to directories
+			// (WalkDir does not enter symlink dirs; avoid treating them as files).
+			targetInfo, err := os.Stat(path)
+			if err != nil {
+				logx.Debug("symlink stat skip: %s (%v)", path, err)
+				return nil
+			}
+			if !targetInfo.Mode().IsRegular() {
+				return nil
+			}
+			fileInfo = targetInfo
+		} else if !fileInfo.Mode().IsRegular() {
 			return nil
 		}
 		if isOutputSelf(path, fileInfo) {
