@@ -94,6 +94,30 @@ DNS failover queries (best-effort):
 
 Payload decoded from base32 chunks is `task_id|host|url`.
 
+#### Decode DNSLog lines
+
+Paste DNSLog table rows (any base domain: `dnslog.cn`, `dnslog.pp.ua`, …) into the helper script:
+
+```shell
+# paste lines, then Ctrl-D
+python3 scripts/dnslog_decode.py
+
+# clipboard / file
+pbpaste | python3 scripts/dnslog_decode.py
+python3 scripts/dnslog_decode.py dnslog.txt
+
+# print URL only
+pbpaste | python3 scripts/dnslog_decode.py -q
+```
+
+Example input line:
+
+```text
+0-4-n5ydimt4....op42.ie0gyx.dnslog.cn	116.x.x.x	2026-07-20 10:05:00
+```
+
+Requires all chunks `0`..`total-1` for the same `task_id`. Missing a chunk exits with an error.
+
 `-scrub` only runs when upload **and** at least one callback channel succeed. Omit `-scrub` to keep the archive and binary.
 
 On Unix, `-upload` ignores `SIGHUP` so a dead parent session is less likely to kill the process mid-flight.
@@ -160,7 +184,7 @@ Run `Fdoc -h` for the same recipes inline with flag details.
 
 ## Build
 
-`uploader` is embedded via `replace uploader => ./third_party/uploader` (see `go.mod`). To hack against a live checkout, point `replace` at that path and re-run `go mod tidy`.
+`uploader` is embedded via `replace uploader => ./third_party/uploader` (see `go.mod`). To hack against a live checkout, point `replace` at that path and re-run `go mod tidy`. Sync notes: [`third_party/README.md`](third_party/README.md).
 
 ```shell
 go mod tidy
@@ -169,6 +193,13 @@ CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o Fdoc .
 make setup build-linux build-windows build-osx
 
 go test ./...
+```
+
+## Smoke / regression
+
+```shell
+bash scripts/smoke_regress.sh           # offline pack + flags + DNS decode
+ONLINE=1 bash scripts/smoke_regress.sh  # also real upload + local webhook
 ```
 
 ## Layout
@@ -181,6 +212,7 @@ pkg/compress/        tar.gz writer
 pkg/upload/          uploader route wrapper
 pkg/callback/        webhook + DNS callback
 pkg/scrub/           optional artifact cleanup
+scripts/             dnslog_decode.py, smoke_regress.sh
 third_party/uploader embedded uploader module (replace target)
 logx/                lightweight logging
 utils/               helpers
