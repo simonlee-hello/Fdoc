@@ -60,7 +60,7 @@ func (b *fichier) DoUpload(name string, size int64, file io.Reader) error {
 
 func (b *fichier) PostUpload(string, int64) (string, error) {
 	if b.resp != "" {
-		fmt.Println(b.resp)
+		apis.EmitLink(b.resp)
 	}
 	if b.pwd != "" && !apis.QuietMode {
 		fmt.Fprintf(os.Stderr, "password: %s\n", b.pwd)

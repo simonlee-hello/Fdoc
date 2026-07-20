@@ -115,13 +115,13 @@ func (b *goFile) PostUpload(string, int64) (string, error) {
 	if b.Config.SingleMode {
 		return "", nil
 	}
-	fmt.Println(b.downloadLink)
+	apis.EmitLink(b.downloadLink)
 	return b.downloadLink, nil
 }
 
 func (b *goFile) FinishUpload([]string) (string, error) {
 	if b.Config.SingleMode && b.downloadLink != "" {
-		fmt.Println(b.downloadLink)
+		apis.EmitLink(b.downloadLink)
 		return b.downloadLink, nil
 	}
 	return "", nil

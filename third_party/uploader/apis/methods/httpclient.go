@@ -28,11 +28,10 @@ var sharedTransport = &http.Transport{
 	ExpectContinueTimeout: 1 * time.Second,
 }
 
-// NewClient returns a client using the shared transport. timeout<=0 uses HTTPTimeout.
+// NewClient returns a client using the shared transport. timeout<=0 uses
+// effectiveHTTPTimeout (probe override or HTTPTimeout).
 func NewClient(timeout time.Duration) *http.Client {
-	if timeout <= 0 {
-		timeout = HTTPTimeout
-	}
+	timeout = effectiveHTTPTimeout(timeout)
 	return &http.Client{Transport: sharedTransport, Timeout: timeout}
 }
 

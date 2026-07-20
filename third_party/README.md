@@ -11,3 +11,5 @@ rsync -a --delete \
   --exclude 'cmd' --exclude 'scripts' --exclude 'main.go' \
   /Users/simon/Documents/tools/uploader/ third_party/uploader/
 ```
+
+冒烟脚本会在存在 `UPLOADER_SRC`（默认探测上述路径）时对关键文件做 `diff`，防止嵌入副本漂移。

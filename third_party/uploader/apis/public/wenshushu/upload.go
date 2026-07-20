@@ -281,7 +281,7 @@ func (b wssTransfer) completeUpload(config sendConfigBlock) (string, error) {
 	if !apis.QuietMode && body.Data.ManageURL != "" {
 		fmt.Fprintf(os.Stderr, "manage: %s\n", body.Data.ManageURL)
 	}
-	fmt.Println(body.Data.PublicURL)
+	apis.EmitLink(body.Data.PublicURL)
 	return body.Data.PublicURL, nil
 }
 

@@ -10,7 +10,11 @@ import (
 	"time"
 
 	"uploader/apis"
+	"uploader/apis/methods"
 )
+
+// DefaultProbeParallel is used by auto-upload when ProbeAll parallel is unspecified.
+const DefaultProbeParallel = 4
 
 // ProbeResult is the outcome of probing one backend.
 type ProbeResult struct {
@@ -27,7 +31,7 @@ type ProbeResult struct {
 var SetupBackend func(name string)
 
 // ProbeRankedForUpload probes size-fitting backends and returns them sorted by latency.
-// Probes run serially: backends share global Mute/TransferConfig/Stdout state.
+// Probes run concurrently (DefaultProbeParallel); each uses isolated upload opts.
 func ProbeRankedForUpload(maxSize int64, force bool) ([]*BackendInfo, error) {
 	targets := SelectProbeTargetsForSize(maxSize, force)
 	if len(targets) == 0 {
@@ -39,8 +43,7 @@ func ProbeRankedForUpload(maxSize int64, force bool) ([]*BackendInfo, error) {
 		fmt.Fprintf(os.Stderr, "auto: probing %d backend(s) (size ≤ %s)...\n", len(targets), formatProbeSize(maxSize))
 	}
 
-	// parallel=1: probeMu + global apis state are not safe for concurrent probes.
-	results, err := ProbeAll(targets, 1, 45*time.Second, !quiet)
+	results, err := ProbeAll(targets, DefaultProbeParallel, 45*time.Second, !quiet)
 	if err != nil {
 		return nil, err
 	}
@@ -135,16 +138,26 @@ func SelectProbeTargetsForSize(maxSize int64, force bool) []BackendInfo {
 	return out
 }
 
-// ProbeAll probes targets. parallel>1 is capped by probeMu (global state); prefer 1.
+// ProbeAll probes targets concurrently up to `parallel` workers.
+// Each probe uses UploadFileOpts (no global TransferConfig / Stdout mutation),
+// so timed-out probes need not be joined before returning.
 func ProbeAll(targets []BackendInfo, parallel int, timeout time.Duration, printLive bool) ([]ProbeResult, error) {
 	if parallel < 1 {
 		parallel = 1
+	}
+	if parallel > len(targets) && len(targets) > 0 {
+		parallel = len(targets)
 	}
 	probeFile, err := writeProbeFile()
 	if err != nil {
 		return nil, err
 	}
 	defer os.Remove(probeFile)
+
+	// Mute once for the whole batch so PostUpload EmitLink stays quiet under concurrency.
+	oldMute := apis.MuteMode
+	apis.MuteMode = true
+	defer func() { apis.MuteMode = oldMute }()
 
 	results := make([]ProbeResult, len(targets))
 	sem := make(chan struct{}, parallel)
@@ -204,8 +217,6 @@ func writeProbeFile() (string, error) {
 	return path, os.WriteFile(path, []byte("uploader probe\n"), 0644)
 }
 
-var probeMu sync.Mutex
-
 func probeOne(info BackendInfo, file string, timeout time.Duration) ProbeResult {
 	res := ProbeResult{Name: info.Name}
 	if info.Status == "down" {
@@ -221,12 +232,11 @@ func probeOne(info BackendInfo, file string, timeout time.Duration) ProbeResult 
 	}
 	ch := make(chan outcome, 1)
 	go func() {
-		probeMu.Lock()
+		methods.AcquireHTTPTimeout(timeout)
+		defer methods.ReleaseHTTPTimeout()
 		start := time.Now()
 		link, err := probeUpload(info, file)
-		lat := time.Since(start)
-		probeMu.Unlock()
-		ch <- outcome{link: link, err: err, latency: lat}
+		ch <- outcome{link: link, err: err, latency: time.Since(start)}
 	}()
 
 	timer := time.NewTimer(timeout)
@@ -235,12 +245,8 @@ func probeOne(info BackendInfo, file string, timeout time.Duration) ProbeResult 
 	case <-timer.C:
 		res.Latency = timeout
 		res.Err = fmt.Sprintf("timeout >%.0fs", timeout.Seconds())
-		// Must join the in-flight probe so probeMu is released and globals restored
-		// before ProbeAll returns / real upload starts.
-		out := <-ch
-		if out.err != nil && res.Err == "" {
-			res.Err = TruncateErr(out.err.Error(), 72)
-		}
+		// Do not join: probeUpload no longer mutates process-global upload state.
+		// A late finish only fills the buffered channel and exits.
 		return res
 	case out := <-ch:
 		res.Latency = out.latency
@@ -255,41 +261,14 @@ func probeOne(info BackendInfo, file string, timeout time.Duration) ProbeResult 
 }
 
 func probeUpload(info BackendInfo, file string) (string, error) {
-	oldMute, oldDebug := apis.MuteMode, apis.DebugMode
-	oldOut := apis.Output
-	oldCfg := *apis.TransferConfig()
-	oldStdout := os.Stdout
-	oldHint := apis.SizeHint
-	defer func() {
-		apis.MuteMode = oldMute
-		apis.DebugMode = oldDebug
-		apis.Output = oldOut
-		*apis.TransferConfig() = oldCfg
-		os.Stdout = oldStdout
-		apis.SizeHint = oldHint
-	}()
-
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err == nil {
-		os.Stdout = devNull
-		defer devNull.Close()
-	}
-
-	apis.MuteMode = false
-	apis.DebugMode = false
-	apis.Output = ""
-	cfg := apis.TransferConfig()
-	cfg.NoBarMode = true
-	cfg.CryptoMode = false
-	cfg.CryptoKey = ""
-	cfg.MaxBytes = info.MaxBytes()
-	cfg.BackendName = info.Name
-	cfg.RecursiveDirs = false
-
 	if SetupBackend != nil {
 		SetupBackend(info.Name)
 	}
-	return apis.UploadFile(file, info.Backend)
+	return apis.UploadFileOpts(file, info.Backend, apis.FileUploadOpts{
+		MaxBytes:    info.MaxBytes(),
+		BackendName: info.Name,
+		NoBar:       true,
+	})
 }
 
 // FormatLatency formats a duration for display.

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"uploader/apis"
+	"uploader/crypto"
 )
 
 // sessionMu serializes probe+upload: Mute/TransferConfig/Stdout/SizeHint are process-global.
@@ -76,6 +77,15 @@ func UploadWithOptions(files []string, opts Options) (link, backendName string, 
 	cfg.CryptoMode = opts.Encrypt
 	cfg.CryptoKey = opts.Key
 	cfg.RecursiveDirs = opts.RecursiveDirs
+
+	if opts.Encrypt {
+		_, normalized, err := crypto.NormalizeKey(opts.Key, false)
+		if err != nil {
+			return "", "", fmt.Errorf("encrypt: %w", err)
+		}
+		cfg.CryptoKey = normalized
+		opts.Key = normalized
+	}
 
 	maxSize, err := EstimateMaxSize(files)
 	if err != nil {

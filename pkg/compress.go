@@ -215,20 +215,20 @@ func WalkAndCompress(info *option.FlagInfo) RunResult {
 	if matchedFiles == 0 {
 		utils.DeleteFile(info.OutputPath)
 		if truncated {
-			fmt.Printf("TRUNCATED at -max %s; no files packed%s\n", info.MaxSize, skipNote)
+			printPackSummary(info.Quiet, "TRUNCATED at -max %s; no files packed%s\n", info.MaxSize, skipNote)
 			return RunResult{Truncated: true}
 		}
-		fmt.Printf("no matching files%s\n", skipNote)
+		printPackSummary(info.Quiet, "no matching files%s\n", skipNote)
 		return RunResult{}
 	}
 
 	archiveBytes := utils.GetTotalSize([]string{info.OutputPath})
 	tarGzSize := utils.BytesToSize(archiveBytes)
 	if truncated {
-		fmt.Printf("TRUNCATED at -max %s; path=%s size=%s files=%d%s\n",
+		printPackSummary(info.Quiet, "TRUNCATED at -max %s; path=%s size=%s files=%d%s\n",
 			info.MaxSize, info.OutputPath, tarGzSize, matchedFiles, skipNote)
 	} else {
-		fmt.Printf("SUCCESS! path=%s size=%s files=%d%s\n",
+		printPackSummary(info.Quiet, "SUCCESS! path=%s size=%s files=%d%s\n",
 			info.OutputPath, tarGzSize, matchedFiles, skipNote)
 	}
 	return RunResult{
@@ -237,6 +237,15 @@ func WalkAndCompress(info *option.FlagInfo) RunResult {
 		MatchedFiles: matchedFiles,
 		Truncated:    truncated,
 	}
+}
+
+// printPackSummary writes pack status to stderr so stdout stays clean for
+// local-echo download URLs when -upload is used. -q suppresses these lines.
+func printPackSummary(quiet bool, format string, args ...any) {
+	if quiet {
+		return
+	}
+	fmt.Fprintf(os.Stderr, format, args...)
 }
 
 func shouldSkipDir(path string, info *option.FlagInfo) bool {

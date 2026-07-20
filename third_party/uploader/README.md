@@ -146,6 +146,11 @@ _ = backend // 实际成功的短名，如 "temp"
 
 CLI 的 `cmd` 已改为调用同一套 `route` 逻辑，避免两套实现。文叔叔等后端在库路径下会补默认 `BlockSize`/`Parallel`，避免 Config 为零时 panic。
 
+**并发说明**：
+- `UploadAuto` / `UploadWithOptions` 同一进程内仍串行（`sessionMu`；真实上传会改全局 `TransferConfig`）。
+- **auto / `probe` 探测已真正并发**（默认并行 4）：探测走 `UploadFileOpts` 隔离配置，不再改 `os.Stdout`；超时探测可立即返回，不必 join 慢后端。
+- PostUpload 链接输出统一经 `apis.EmitLink`（Mute/Quiet 下静默），避免并发探测刷屏或抢 stdout。
+
 依赖方式示例：
 
 ```bash

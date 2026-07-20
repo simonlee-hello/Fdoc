@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"uploader/crypto"
 	"uploader/utils"
 )
@@ -87,14 +88,15 @@ func Upload(files []string, backend BaseBackend) error {
 	}
 
 	if transferConfig.CryptoMode {
-		displayKey, normalized, err := crypto.NormalizeKey(transferConfig.CryptoKey, true)
+		// Never auto-generate a key for upload encrypt — caller must pass -key.
+		displayKey, normalized, err := crypto.NormalizeKey(transferConfig.CryptoKey, false)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "encrypt: %v\n", err)
 			return err
 		}
 		transferConfig.CryptoKey = normalized
 		if !QuietMode {
-			fmt.Fprintf(os.Stderr, "key: %s\n", displayKey)
+			fmt.Fprintf(os.Stderr, "encrypt key ready (%d chars display)\n", len(displayKey))
 		}
 		for i := range sizes {
 			sizes[i] = crypto.CalcEncryptSize(sizes[i])
@@ -119,7 +121,7 @@ func Upload(files []string, backend BaseBackend) error {
 	}
 	var uploadErr error
 	for n, file := range paths {
-		resp, err := upload(file, sizes[n], backend)
+		resp, err := uploadWith(file, sizes[n], backend, fileOptsFromGlobal())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "upload %s: %v\n", filepath.Base(file), err)
 			uploadErr = err
@@ -150,28 +152,58 @@ func Upload(files []string, backend BaseBackend) error {
 	return uploadErr
 }
 
+// FileUploadOpts is a per-call config snapshot so probes can run concurrently
+// without mutating process-global TransferConfig / Stdout.
+type FileUploadOpts struct {
+	MaxBytes    int64
+	BackendName string
+	NoBar       bool
+	Crypto      bool
+	CryptoKey   string
+}
+
+func fileOptsFromGlobal() FileUploadOpts {
+	return FileUploadOpts{
+		MaxBytes:    transferConfig.MaxBytes,
+		BackendName: transferConfig.BackendName,
+		NoBar:       transferConfig.NoBarMode,
+		Crypto:      transferConfig.CryptoMode,
+		CryptoKey:   transferConfig.CryptoKey,
+	}
+}
+
+// UploadFile uploads one file using the process-global TransferConfig.
 func UploadFile(path string, backend BaseBackend) (string, error) {
+	return UploadFileOpts(path, backend, fileOptsFromGlobal())
+}
+
+// UploadFileOpts uploads one file with an explicit config (safe for concurrent probes).
+func UploadFileOpts(path string, backend BaseBackend, opts FileUploadOpts) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", err
 	}
 	size := info.Size()
-	nameSize := size
-	if transferConfig.CryptoMode {
-		nameSize = crypto.CalcEncryptSize(size)
+	if opts.Crypto {
+		_, normalized, err := crypto.NormalizeKey(opts.CryptoKey, false)
+		if err != nil {
+			return "", fmt.Errorf("encrypt: %w", err)
+		}
+		opts.CryptoKey = normalized
+		size = crypto.CalcEncryptSize(info.Size())
 	}
-	if err := utils.CheckUploadSize(filepath.Base(path), nameSize, transferConfig.MaxBytes, transferConfig.BackendName); err != nil {
+	if err := utils.CheckUploadSize(filepath.Base(path), size, opts.MaxBytes, opts.BackendName); err != nil {
 		if SizeHint != nil {
-			if hint := SizeHint(nameSize); hint != "" {
+			if hint := SizeHint(size); hint != "" {
 				return "", fmt.Errorf("%w\n%s", err, hint)
 			}
 		}
 		return "", err
 	}
-	if err := backend.InitUpload([]string{path}, []int64{nameSize}); err != nil {
+	if err := backend.InitUpload([]string{path}, []int64{size}); err != nil {
 		return "", err
 	}
-	link, err := upload(path, size, backend)
+	link, err := uploadWith(path, size, backend, opts)
 	if err != nil {
 		return "", err
 	}
@@ -185,56 +217,137 @@ func UploadFile(path string, backend BaseBackend) (string, error) {
 	return link, nil
 }
 
-func upload(file string, size int64, backend BaseBackend) (string, error) {
+func uploadWith(file string, size int64, backend BaseBackend, opts FileUploadOpts) (string, error) {
 	info, err := os.Stat(file)
 	if err != nil {
 		return "", err
 	}
 
 	name := info.Name()
-	// Always derive encrypt size from plaintext file length. Callers may already
-	// pass CalcEncryptSize()'d values into size (for InitUpload); recomputing
-	// from that would inflate Content-Length by magic+IV+pad (~32 bytes).
 	uploadSize := size
-	if transferConfig.CryptoMode {
+	if opts.Crypto {
 		uploadSize = crypto.CalcEncryptSize(info.Size())
 		// Keep a normal-looking name: hosts like tmpfiles reject ".encrypt".
-		// No extension → .bin so the upload still looks like a regular file.
 		if filepath.Ext(name) == "" {
 			name = name + ".bin"
 		}
 	} else if uploadSize <= 0 {
 		uploadSize = info.Size()
 	}
+	// Prefer .tgz over .tar.gz so download hosts don't look like plain .gz.
+	name = preferTgzName(name)
 
 	if err = backend.PreUpload(name, uploadSize); err != nil {
 		return "", err
 	}
-	fileStream, err := os.Open(file)
-	if err != nil {
-		return "", err
-	}
-	defer fileStream.Close()
 
-	var reader io.Reader = fileStream
-	if transferConfig.CryptoMode {
-		pr, pw := io.Pipe()
-		go func() {
-			encErr := crypto.StreamEncrypt(fileStream, pw, transferConfig.CryptoKey, 0)
-			_ = pw.CloseWithError(encErr)
-		}()
-		reader = pr
+	var (
+		reader  io.Reader
+		closer  io.Closer
+		cleanup func()
+	)
+	if opts.Crypto {
+		// Encrypt to a temp file first so Content-Length matches bytes on the wire
+		// (streaming pipe + some multipart backends previously risked uploading plaintext).
+		encPath, encSize, err := encryptFileToTemp(file, opts.CryptoKey)
+		if err != nil {
+			return "", err
+		}
+		cleanup = func() { _ = os.Remove(encPath) }
+		defer cleanup()
+		if encSize != uploadSize {
+			return "", fmt.Errorf("encrypt size mismatch: got %d want %d", encSize, uploadSize)
+		}
+		f, err := os.Open(encPath)
+		if err != nil {
+			return "", err
+		}
+		closer = f
+		reader = f
+		// Filename stays *.tgz for host/browser friendliness, but bytes are UP01
+		// ciphertext — must Fdoc decrypt (or uploader decrypt) before tar/gunzip.
+		fmt.Fprintf(os.Stderr, "ENCRYPT_OK plain=%d cipher=%d decrypt_first=1 (Fdoc decrypt -key <KEY> -o out.tgz <file>)\n", info.Size(), encSize)
+	} else {
+		f, err := os.Open(file)
+		if err != nil {
+			return "", err
+		}
+		closer = f
+		reader = f
 	}
+	defer closer.Close()
 
-	if !transferConfig.NoBarMode {
+	if !opts.NoBar {
 		reader = backend.StartProgress(reader, uploadSize)
 	}
 
 	if err = backend.DoUpload(name, uploadSize, reader); err != nil {
 		return "", err
 	}
-	if !transferConfig.NoBarMode {
+	if !opts.NoBar {
 		backend.EndProgress()
 	}
 	return backend.PostUpload(name, uploadSize)
+}
+
+func encryptFileToTemp(srcPath, key string) (encPath string, encSize int64, err error) {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return "", 0, err
+	}
+	defer src.Close()
+
+	// Prefer the source directory so multi-GB ciphertext lands on the same
+	// filesystem as the archive — not os.TempDir(), which is often tmpfs.
+	tmpDir := filepath.Dir(srcPath)
+	if tmpDir == "" || tmpDir == "." {
+		tmpDir = "."
+	}
+	tmp, err := os.CreateTemp(tmpDir, ".uploader-enc-*.bin")
+	if err != nil {
+		return "", 0, err
+	}
+	encPath = tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		if err != nil {
+			_ = os.Remove(encPath)
+		}
+	}()
+
+	if err = crypto.StreamEncrypt(src, tmp, key, 0); err != nil {
+		return "", 0, err
+	}
+	if err = tmp.Sync(); err != nil {
+		return "", 0, err
+	}
+	fi, err := tmp.Stat()
+	if err != nil {
+		return "", 0, err
+	}
+	encSize = fi.Size()
+
+	// Verify modern header so we never upload a failed/partial ciphertext as "encrypted".
+	if _, err = tmp.Seek(0, io.SeekStart); err != nil {
+		return "", 0, err
+	}
+	magic := make([]byte, 4)
+	if _, err = io.ReadFull(tmp, magic); err != nil {
+		return "", 0, err
+	}
+	if string(magic) != "UP01" {
+		return "", 0, fmt.Errorf("encrypt produced invalid header %q (want UP01)", magic)
+	}
+	return encPath, encSize, nil
+}
+
+// preferTgzName rewrites *.tar.gz to *.tgz so hosts/browsers don't treat the
+// name as plain gzip. With -encrypt the bytes are still UP01 ciphertext —
+// callers must decrypt before unpacking (see ENCRYPT_OK decrypt_first=1).
+func preferTgzName(name string) string {
+	lower := strings.ToLower(name)
+	if strings.HasSuffix(lower, ".tar.gz") {
+		return name[:len(name)-len(".tar.gz")] + ".tgz"
+	}
+	return name
 }

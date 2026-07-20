@@ -2,6 +2,7 @@ package callback
 
 import (
 	"context"
+	"encoding/base32"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -28,6 +29,32 @@ func TestEncodeDNSChunks(t *testing.T) {
 	if !strings.Contains(joined, "a") { // base32 alphabet
 		t.Fatalf("unexpected encoding: %q", joined)
 	}
+}
+
+func TestEncodeDNSChunksStripsPipeInHost(t *testing.T) {
+	_, chunks := EncodeDNSChunks("t1", "host|evil", "https://x")
+	joined := strings.Join(chunks, "")
+	// decode and ensure only two pipes in payload
+	raw := mustB32(t, joined)
+	if strings.Count(raw, "|") != 2 {
+		t.Fatalf("payload %q should have exactly 2 pipes", raw)
+	}
+	if strings.Contains(raw, "host|evil") {
+		t.Fatalf("host pipe not stripped: %q", raw)
+	}
+}
+
+func mustB32(t *testing.T, s string) string {
+	t.Helper()
+	s = strings.ToUpper(s)
+	for len(s)%8 != 0 {
+		s += "="
+	}
+	b, err := base32.StdEncoding.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }
 
 func TestNotifyWebhookOK(t *testing.T) {
@@ -106,7 +133,7 @@ func TestSendDNSRejectsEmptyTask(t *testing.T) {
 		TaskID: "!!!",
 		Host:   "h",
 		URL:    "https://x",
-	})
+	}, 5*time.Second)
 	if err == nil || !strings.Contains(err.Error(), "sanitize") {
 		t.Fatalf("got %v", err)
 	}

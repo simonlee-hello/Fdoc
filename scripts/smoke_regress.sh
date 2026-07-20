@@ -44,6 +44,39 @@ cleanup() {
 }
 cleanup
 
+step "0) third_party/uploader sync check (optional UPLOADER_SRC)"
+UPLOADER_SRC="${UPLOADER_SRC:-}"
+if [[ -z "$UPLOADER_SRC" && -d /Users/simon/Documents/tools/uploader ]]; then
+  UPLOADER_SRC=/Users/simon/Documents/tools/uploader
+fi
+if [[ -n "$UPLOADER_SRC" && -d "$UPLOADER_SRC" ]]; then
+  sync_paths=(
+    apis/upload.go
+    apis/encrypt_temp_test.go
+    crypto/stream.go
+    crypto/aes_test.go
+    route/probe.go
+    route/upload.go
+    apis/methods/httpclient.go
+    apis/methods/timeout_override.go
+    apis/methods/timeout_override_test.go
+  )
+  sync_ok=1
+  for rel in "${sync_paths[@]}"; do
+    if [[ -f "$UPLOADER_SRC/$rel" && -f "$ROOT/third_party/uploader/$rel" ]]; then
+      if ! diff -q "$UPLOADER_SRC/$rel" "$ROOT/third_party/uploader/$rel" >/dev/null; then
+        bad "third_party drift: $rel (rsync from UPLOADER_SRC)"
+        sync_ok=0
+      fi
+    fi
+  done
+  if [[ $sync_ok -eq 1 ]]; then
+    ok "third_party key files match UPLOADER_SRC"
+  fi
+else
+  ok "skip third_party sync check (set UPLOADER_SRC)"
+fi
+
 step "1) unit tests"
 if go test ./...; then
   ok "go test ./..."
@@ -117,8 +150,13 @@ set +e
 err="$("$BIN" -d "$SRC" -x skipme -o "$OUT/no-cb.tar.gz" -upload -q 2>&1)"
 ec=$?
 set -e
-assert_eq 1 "$ec" "upload without callback exits 1"
-assert_contains "$err" "webhook" "error mentions webhook/dns"
+# -upload alone is local-echo mode: must not fail flag validation for missing webhook/dns.
+if echo "$err" | grep -Eiq 'requires -webhook|requires.*dns for result'; then
+  bad "upload without callback should be allowed (got validation error)"
+else
+  ok "upload without webhook/dns allowed (local echo)"
+fi
+# Offline may fail at network upload (ec!=0) or succeed; either is fine for this check.
 
 set +e
 err="$("$BIN" -d "$SRC" -x skipme -size -upload -webhook http://127.0.0.1:9/ -q 2>&1)"
@@ -171,6 +209,14 @@ set -e
 assert_eq 1 "$ec" "-scrub without -upload exits 1"
 assert_contains "$err" "-upload" "error mentions -upload"
 
+step "7a) encrypt flag validation"
+set +e
+err="$("$BIN" -d "$SRC" -x skipme -o "$OUT/enc-only.tar.gz" -encrypt -key x -q 2>&1)"
+ec=$?
+set -e
+assert_eq 1 "$ec" "-encrypt without -upload exits 1"
+assert_contains "$err" "-upload" "encrypt error mentions -upload"
+
 step "7b) webhook http non-loopback rejected"
 set +e
 err="$("$BIN" -d "$SRC" -x skipme -o "$OUT/bad-wh.tar.gz" -upload -webhook http://example.com/h -q 2>&1)"
@@ -179,14 +225,82 @@ set -e
 assert_eq 1 "$ec" "non-loopback http webhook rejected"
 assert_contains "$err" "https" "error mentions https"
 
+step "7c) decrypt subcommand roundtrip"
+ENC_DIR="$OUT/decrypt-rt"
+rm -rf "$ENC_DIR"
+mkdir -p "$ENC_DIR"
+printf 'Fdoc decrypt smoke payload\n' > "$ENC_DIR/plain.tgz"
+cat > "$ENC_DIR/enc_helper.go" <<'EOF'
+package main
+
+import (
+	"os"
+
+	"uploader/crypto"
+)
+
+func main() {
+	_, nk, err := crypto.NormalizeKey(os.Args[1], false)
+	if err != nil {
+		panic(err)
+	}
+	s, err := os.Open(os.Args[2])
+	if err != nil {
+		panic(err)
+	}
+	defer s.Close()
+	d, err := os.Create(os.Args[3])
+	if err != nil {
+		panic(err)
+	}
+	defer d.Close()
+	if err := crypto.StreamEncrypt(s, d, nk, 0); err != nil {
+		panic(err)
+	}
+}
+EOF
+(
+  cd "$ENC_DIR"
+  go mod init fdoc_enc_helper >/dev/null
+  printf 'replace uploader => %s\n' "$ROOT/third_party/uploader" >> go.mod
+  go mod tidy >/dev/null
+  go run . 'smoke-key' plain.tgz cipher.bin
+)
+set +e
+err="$("$BIN" decrypt -key 'smoke-key' -o "$ENC_DIR/out.tgz" -force "$ENC_DIR/cipher.bin" 2>&1)"
+ec=$?
+set -e
+assert_eq 0 "$ec" "decrypt exit"
+assert_contains "$err" "DECRYPT_OK" "decrypt prints DECRYPT_OK"
+if cmp -s "$ENC_DIR/plain.tgz" "$ENC_DIR/out.tgz"; then
+  ok "decrypt roundtrip bytes"
+else
+  bad "decrypt roundtrip bytes mismatch"
+fi
+set +e
+err="$("$BIN" decrypt -key 'smoke-key' -o "$ENC_DIR/bad.tgz" -force "$ENC_DIR/plain.tgz" 2>&1)"
+ec=$?
+set -e
+assert_eq 1 "$ec" "decrypt rejects plaintext"
+
 step "8) online upload smoke (optional ONLINE=1)"
 if [[ "$ONLINE" == "1" ]]; then
   WH_LOG="$OUT/webhook.log"
+  WH_PORT="${ONLINE_WEBHOOK_PORT:-18765}"
   rm -f "$OUT/online.tar.gz" "$WH_LOG"
-  python3 - "$WH_LOG" <<'PY' &
+  # Free leftover listeners from a previous interrupted run.
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -tiTCP:"$WH_PORT" -sTCP:LISTEN 2>/dev/null || true)"
+    if [[ -n "$pids" ]]; then
+      # shellcheck disable=SC2086
+      kill $pids 2>/dev/null || true
+      sleep 0.2
+    fi
+  fi
+  python3 - "$WH_LOG" "$WH_PORT" <<'PY' &
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
-path = sys.argv[1]
+path, port = sys.argv[1], int(sys.argv[2])
 class H(BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length", "0"))
@@ -197,25 +311,45 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(b"ok")
     def log_message(self, *a):
         pass
-HTTPServer(("127.0.0.1", 18765), H).handle_request()
+httpd = HTTPServer(("127.0.0.1", port), H)
+httpd.timeout = 120
+httpd.handle_request()
 PY
   WH_PID=$!
   sleep 0.4
-  set +e
-  "$BIN" -d "$SRC" -x skipme -e pdf -o "$OUT/online.tar.gz" -upload \
-    -webhook "http://127.0.0.1:18765/hook" \
-    -task-id smoke1 -b temp -q
-  ec=$?
-  set -e
-  wait "$WH_PID" 2>/dev/null || true
-  if [[ "$ec" -eq 0 || "$ec" -eq 2 ]] && [[ -f "$WH_LOG" ]]; then
-    if python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d.get('url','').startswith('http'); assert d['task_id']=='smoke1'" "$WH_LOG"; then
-      ok "online upload+webhook"
-    else
-      bad "webhook JSON invalid"
-    fi
+  if ! kill -0 "$WH_PID" 2>/dev/null; then
+    bad "webhook listener failed to start on :$WH_PORT"
   else
-    bad "online upload failed exit=$ec"
+    set +e
+    # Prefer auto backend (temp.sh may 403); pin via ONLINE_BACKEND=temp if needed.
+    ONLINE_BACKEND="${ONLINE_BACKEND:-}"
+    if [[ -n "$ONLINE_BACKEND" ]]; then
+      "$BIN" -d "$SRC" -x skipme -e pdf -o "$OUT/online.tar.gz" -upload \
+        -webhook "http://127.0.0.1:${WH_PORT}/hook" \
+        -task-id smoke1 -b "$ONLINE_BACKEND" -q
+    else
+      "$BIN" -d "$SRC" -x skipme -e pdf -o "$OUT/online.tar.gz" -upload \
+        -webhook "http://127.0.0.1:${WH_PORT}/hook" \
+        -task-id smoke1 -q
+    fi
+    ec=$?
+    set -e
+    # Don't hang forever if upload failed and webhook never received a request.
+    for _ in $(seq 1 20); do
+      kill -0 "$WH_PID" 2>/dev/null || break
+      sleep 0.25
+    done
+    kill "$WH_PID" 2>/dev/null || true
+    wait "$WH_PID" 2>/dev/null || true
+    if [[ "$ec" -eq 0 || "$ec" -eq 2 ]] && [[ -f "$WH_LOG" ]]; then
+      if python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d.get('url','').startswith('http'); assert d['task_id']=='smoke1'" "$WH_LOG"; then
+        ok "online upload+webhook"
+      else
+        bad "webhook JSON invalid"
+      fi
+    else
+      bad "online upload failed exit=$ec"
+    fi
   fi
 else
   ok "skip online (set ONLINE=1 to enable)"

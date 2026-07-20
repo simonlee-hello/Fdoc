@@ -3,38 +3,34 @@
 package scrub
 
 import (
-	"Fdoc/logx"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
 	"unsafe"
 )
 
-func removeSelf() {
+func removeSelf() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		logx.Warning("scrub self: executable path: %v", err)
-		return
+		return "", fmt.Errorf("executable path: %w", err)
 	}
 	// Try immediate delete (often fails while mapped).
 	if err := os.Remove(exe); err == nil || os.IsNotExist(err) {
-		logx.Debug("scrubbed self: %s", exe)
-		return
+		return exe, nil
 	}
-	// Rename then schedule delete on reboot.
+	// Rename then schedule delete on reboot (may require elevated privileges).
 	dir := filepath.Dir(exe)
 	tmp := filepath.Join(dir, filepath.Base(exe)+".deleted")
 	if err := os.Rename(exe, tmp); err != nil {
-		logx.Warning("scrub self rename: %v", err)
 		tmp = exe
 	} else {
 		exe = tmp
 	}
 	if err := moveFileExDelete(exe); err != nil {
-		logx.Warning("scrub self delayed delete: %v", err)
-		return
+		return exe, fmt.Errorf("delayed delete (often needs admin): %w", err)
 	}
-	logx.Debug("scrub self scheduled: %s", exe)
+	return exe, nil
 }
 
 func moveFileExDelete(path string) error {

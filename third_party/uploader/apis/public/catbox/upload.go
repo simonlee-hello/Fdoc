@@ -34,7 +34,7 @@ func (b *catBox) DoUpload(name string, size int64, file io.Reader) error {
 }
 
 func (b catBox) PostUpload(string, int64) (string, error) {
-	fmt.Println(b.resp)
+	apis.EmitLink(b.resp)
 	return b.resp, nil
 }
 

@@ -43,6 +43,7 @@ func StreamEncrypt(reader io.Reader, writer io.Writer, key string, _ int64) erro
 	mode := cipher.NewCBCEncrypter(block, iv)
 	pending := make([]byte, 0, 64*1024)
 	tmp := make([]byte, 32*1024)
+	outBuf := make([]byte, 0, 64*1024)
 
 	flushFullBlocks := func(keepLastBlock bool) error {
 		n := len(pending)
@@ -58,9 +59,13 @@ func StreamEncrypt(reader io.Reader, writer io.Writer, key string, _ int64) erro
 		if usable <= 0 {
 			return nil
 		}
-		out := make([]byte, usable)
-		mode.CryptBlocks(out, pending[:usable])
-		if _, err := writer.Write(out); err != nil {
+		if cap(outBuf) < usable {
+			outBuf = make([]byte, usable)
+		} else {
+			outBuf = outBuf[:usable]
+		}
+		mode.CryptBlocks(outBuf, pending[:usable])
+		if _, err := writer.Write(outBuf); err != nil {
 			return err
 		}
 		pending = append(pending[:0], pending[usable:]...)
@@ -91,49 +96,105 @@ func StreamEncrypt(reader io.Reader, writer io.Writer, key string, _ int64) erro
 }
 
 // StreamDecrypt reads modern (UP01-prefixed) or legacy (fixed-IV) ciphertext.
+// Decryption is streamed in CBC-block chunks so multi-GB archives do not need
+// to fit in RAM (only a small pending buffer is held).
 func StreamDecrypt(reader io.Reader, writer io.Writer, key string, _ int64) error {
-	all, err := io.ReadAll(reader)
-	if err != nil {
-		return err
-	}
-	if len(all) < aes.BlockSize {
-		return fmt.Errorf("ciphertext too short")
-	}
-
 	keyBytes := []byte(key)
 
-	if bytes.HasPrefix(all, modernMagic) {
-		body := all[len(modernMagic):]
-		if len(body) < aes.BlockSize*2 || len(body)%aes.BlockSize != 0 {
-			return fmt.Errorf("invalid modern ciphertext length")
+	hdr := make([]byte, len(modernMagic))
+	if _, err := io.ReadFull(reader, hdr); err != nil {
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return fmt.Errorf("ciphertext too short")
 		}
-		return decryptCBCToWriter(body[aes.BlockSize:], keyBytes, body[:aes.BlockSize], writer)
+		return err
+	}
+
+	if bytes.Equal(hdr, modernMagic) {
+		iv := make([]byte, aes.BlockSize)
+		if _, err := io.ReadFull(reader, iv); err != nil {
+			return fmt.Errorf("invalid modern ciphertext: missing IV: %w", err)
+		}
+		return streamDecryptCBC(reader, writer, keyBytes, iv)
 	}
 
 	// Legacy fixed-IV format (no magic / IV prefix)
-	if len(all)%aes.BlockSize != 0 {
-		return fmt.Errorf("invalid ciphertext length")
+	if hdr[0] == 0x1f && hdr[1] == 0x8b {
+		return fmt.Errorf("file looks like plaintext gzip (not encrypted); re-upload with -encrypt -key, expect UP01 header")
 	}
-	return decryptCBCToWriter(all, keyBytes, legacyFixedIV, writer)
+	return streamDecryptCBC(io.MultiReader(bytes.NewReader(hdr), reader), writer, keyBytes, legacyFixedIV)
 }
 
-func decryptCBCToWriter(cipherText, key, iv []byte, writer io.Writer) error {
+// streamDecryptCBC decrypts AES-CBC from reader to writer, holding only a
+// small pending buffer. PKCS7 padding is stripped from the final block(s).
+func streamDecryptCBC(reader io.Reader, writer io.Writer, key, iv []byte) error {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return err
 	}
-	if len(cipherText) == 0 || len(cipherText)%aes.BlockSize != 0 {
+	mode := cipher.NewCBCDecrypter(block, iv)
+
+	pending := make([]byte, 0, 64*1024)
+	tmp := make([]byte, 32*1024)
+	outBuf := make([]byte, 0, 64*1024)
+
+	flushFullBlocks := func(keepLastBlock bool) error {
+		n := len(pending)
+		if n < aes.BlockSize {
+			return nil
+		}
+		usable := n - n%aes.BlockSize
+		if keepLastBlock {
+			if usable == n {
+				usable -= aes.BlockSize
+			}
+		}
+		if usable <= 0 {
+			return nil
+		}
+		if cap(outBuf) < usable {
+			outBuf = make([]byte, usable)
+		} else {
+			outBuf = outBuf[:usable]
+		}
+		mode.CryptBlocks(outBuf, pending[:usable])
+		if _, err := writer.Write(outBuf); err != nil {
+			return err
+		}
+		pending = append(pending[:0], pending[usable:]...)
+		return nil
+	}
+
+	for {
+		nr, readErr := reader.Read(tmp)
+		if nr > 0 {
+			pending = append(pending, tmp[:nr]...)
+			if err := flushFullBlocks(true); err != nil {
+				return err
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+
+	if len(pending) == 0 || len(pending)%aes.BlockSize != 0 {
 		return fmt.Errorf("invalid block alignment")
 	}
-	mode := cipher.NewCBCDecrypter(block, iv)
-	plain := make([]byte, len(cipherText))
-	mode.CryptBlocks(plain, cipherText)
-	plain, err = safeUnpadding(plain)
+	out := make([]byte, len(pending))
+	mode.CryptBlocks(out, pending)
+	plain, err := safeUnpadding(out)
 	if err != nil {
 		return err
 	}
 	_, err = writer.Write(plain)
 	return err
+}
+
+func decryptCBCToWriter(cipherText, key, iv []byte, writer io.Writer) error {
+	return streamDecryptCBC(bytes.NewReader(cipherText), writer, key, iv)
 }
 
 func safeUnpadding(src []byte) ([]byte, error) {

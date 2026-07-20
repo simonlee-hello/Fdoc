@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	infoLog  = log.New(os.Stdout, "", log.LstdFlags)
+	infoLog  = log.New(os.Stderr, "", log.LstdFlags)
 	warnLog  = log.New(os.Stderr, "", log.LstdFlags)
 	errorLog = log.New(os.Stderr, "", log.LstdFlags)
 	debugLog = log.New(io.Discard, "", log.LstdFlags)
@@ -19,7 +19,7 @@ func SetQuiet(quiet bool) {
 	if quiet {
 		infoLog.SetOutput(io.Discard)
 	} else {
-		infoLog.SetOutput(os.Stdout)
+		infoLog.SetOutput(os.Stderr)
 	}
 }
 

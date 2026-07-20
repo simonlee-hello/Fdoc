@@ -10,6 +10,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strconv"
+
+	"uploader/apis"
 )
 
 const upload = "https://0x0.st/"
@@ -19,7 +21,7 @@ func (b *null) DoUpload(name string, size int64, file io.Reader) error {
 }
 
 func (b *null) PostUpload(string, int64) (string, error) {
-	fmt.Println(b.resp)
+	apis.EmitLink(b.resp)
 	return b.resp, nil
 }
 

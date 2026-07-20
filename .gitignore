@@ -17,3 +17,9 @@ testdata/manual/out/
 # Go
 *.test
 *.out
+
+# Vendored uploader: keep Go sources only
+third_party/uploader/rust/
+third_party/uploader/bin/
+third_party/uploader/uploader
+third_party/uploader/.idea/

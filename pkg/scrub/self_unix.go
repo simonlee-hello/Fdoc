@@ -3,19 +3,17 @@
 package scrub
 
 import (
-	"Fdoc/logx"
+	"fmt"
 	"os"
 )
 
-func removeSelf() {
+func removeSelf() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		logx.Warning("scrub self: executable path: %v", err)
-		return
+		return "", fmt.Errorf("executable path: %w", err)
 	}
 	if err := os.Remove(exe); err != nil && !os.IsNotExist(err) {
-		logx.Warning("scrub self: %v", err)
-		return
+		return exe, err
 	}
-	logx.Debug("scrubbed self: %s", exe)
+	return exe, nil
 }

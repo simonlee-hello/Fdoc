@@ -61,6 +61,6 @@ func truncate(s string, n int) string {
 }
 
 func (b *cnet) PostUpload(string, int64) (string, error) {
-	fmt.Println(b.resp)
+	apis.EmitLink(b.resp)
 	return b.resp, nil
 }

