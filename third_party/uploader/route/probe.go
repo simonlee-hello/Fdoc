@@ -32,7 +32,9 @@ var SetupBackend func(name string)
 
 // ProbeRankedForUpload probes size-fitting backends and returns them sorted by latency.
 // Probes run concurrently (DefaultProbeParallel); each uses isolated upload opts.
-func ProbeRankedForUpload(maxSize int64, force bool) ([]*BackendInfo, error) {
+// When QuietMode is false, prints brief stage lines (probing / using).
+// Per-backend OK/FAIL lines print only when verbose is true.
+func ProbeRankedForUpload(maxSize int64, force bool, verbose bool) ([]*BackendInfo, error) {
 	targets := SelectProbeTargetsForSize(maxSize, force)
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("no backend available for this file size")
@@ -43,7 +45,7 @@ func ProbeRankedForUpload(maxSize int64, force bool) ([]*BackendInfo, error) {
 		fmt.Fprintf(os.Stderr, "auto: probing %d backend(s) (size ≤ %s)...\n", len(targets), formatProbeSize(maxSize))
 	}
 
-	results, err := ProbeAll(targets, DefaultProbeParallel, 45*time.Second, !quiet)
+	results, err := ProbeAll(targets, DefaultProbeParallel, 45*time.Second, !quiet && verbose)
 	if err != nil {
 		return nil, err
 	}

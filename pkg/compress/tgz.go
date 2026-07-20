@@ -84,6 +84,7 @@ func FileToTarGz(filePath string, rootDir string, tarWriter *tar.Writer) error {
 
 	rel, err := filepath.Rel(rootDir, filePath)
 	if err != nil {
+		logx.Warning("path not under root (cross-volume?): %s (root=%s); using basename only", filePath, rootDir)
 		rel = filepath.Base(filePath)
 	}
 

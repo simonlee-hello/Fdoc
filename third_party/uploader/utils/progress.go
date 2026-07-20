@@ -104,7 +104,7 @@ func (p *ProgressWriter) Finish() {
 }
 
 // DefaultTickInterval is used when NoBar uploads request tick progress with TickEvery==0.
-const DefaultTickInterval = 3 * time.Minute
+const DefaultTickInterval = 30 * time.Second
 
 // IntervalProgressReader prints a full stderr line at most once per interval
 // (for headless / NoBar uploads where a spinner bar is undesirable).

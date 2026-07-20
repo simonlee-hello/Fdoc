@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // RunResult is the outcome of WalkAndCompress.
@@ -48,6 +49,8 @@ func WalkAndCompress(info *option.FlagInfo) RunResult {
 		seenInodes     = make(map[[2]uint64]struct{})
 		outputID       [2]uint64
 		hasOutputID    bool
+		lastPackTick   = time.Now()
+		lastPackFiles  int
 	)
 	if !info.Size {
 		if fi, err := os.Lstat(info.OutputPath); err == nil {
@@ -178,6 +181,12 @@ func WalkAndCompress(info *option.FlagInfo) RunResult {
 		totalAllocated += allocated
 		matchedFiles++
 		logx.Debug("matched file: %v logical=%d allocated=%d", path, logical, allocated)
+		if time.Since(lastPackTick) >= 5*time.Second || matchedFiles-lastPackFiles >= 50 {
+			fmt.Fprintf(os.Stderr, "PACK_PROGRESS files=%d logical=%s\n",
+				matchedFiles, utils.BytesToSize(totalLogical))
+			lastPackTick = time.Now()
+			lastPackFiles = matchedFiles
+		}
 		return nil
 	}
 

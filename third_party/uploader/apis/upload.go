@@ -232,15 +232,16 @@ func uploadWith(file string, size int64, backend BaseBackend, opts FileUploadOpt
 	uploadSize := size
 	if opts.Crypto {
 		uploadSize = crypto.CalcEncryptSize(info.Size())
-		// Keep a normal-looking name: hosts like tmpfiles reject ".encrypt".
-		if filepath.Ext(name) == "" {
-			name = name + ".bin"
-		}
 	} else if uploadSize <= 0 {
 		uploadSize = info.Size()
 	}
-	// Prefer .tgz over .tar.gz so download hosts don't look like plain .gz.
+	// Prefer .tgz over .tar.gz so hosts/browsers don't treat the name as plain .gz.
 	name = preferTgzName(name)
+	if opts.Crypto {
+		// Ciphertext is UP01, not a gzip archive — use .bin so hosts/tmpfiles accept
+		// it and operators don't gunzip by mistake. Never use .encrypt (tmpfiles rejects).
+		name = preferEncryptedRemoteName(name)
+	}
 
 	if err = backend.PreUpload(name, uploadSize); err != nil {
 		return "", err
@@ -269,9 +270,7 @@ func uploadWith(file string, size int64, backend BaseBackend, opts FileUploadOpt
 		}
 		closer = f
 		reader = f
-		// Filename stays *.tgz for host/browser friendliness, but bytes are UP01
-		// ciphertext — must Fdoc decrypt (or uploader decrypt) before tar/gunzip.
-		fmt.Fprintf(os.Stderr, "ENCRYPT_OK plain=%d cipher=%d decrypt_first=1 (Fdoc decrypt -key <KEY> -o out.tgz <file>)\n", info.Size(), encSize)
+		fmt.Fprintf(os.Stderr, "ENCRYPT_OK plain=%d cipher=%d encrypted=1 decrypt_first=1 remote=%s (Fdoc decrypt -key <KEY> -o out.tgz <file>)\n", info.Size(), encSize, name)
 	} else {
 		f, err := os.Open(file)
 		if err != nil {
@@ -371,12 +370,30 @@ func encryptFileToTemp(srcPath, key string, tickEvery time.Duration) (encPath st
 }
 
 // preferTgzName rewrites *.tar.gz to *.tgz so hosts/browsers don't treat the
-// name as plain gzip. With -encrypt the bytes are still UP01 ciphertext —
-// callers must decrypt before unpacking (see ENCRYPT_OK decrypt_first=1).
+// name as plain gzip.
 func preferTgzName(name string) string {
 	lower := strings.ToLower(name)
 	if strings.HasSuffix(lower, ".tar.gz") {
 		return name[:len(name)-len(".tar.gz")] + ".tgz"
 	}
 	return name
+}
+
+// preferEncryptedRemoteName rewrites the remote upload name to *.bin for
+// ciphertext. Avoids .encrypt (rejected by tmpfiles) and fake *.tgz names.
+func preferEncryptedRemoteName(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.HasSuffix(lower, ".encrypt"):
+		return name[:len(name)-len(".encrypt")] + ".bin"
+	case strings.HasSuffix(lower, ".tgz"):
+		return name[:len(name)-len(".tgz")] + ".bin"
+	case strings.HasSuffix(lower, ".bin"):
+		return name
+	case filepath.Ext(name) == "":
+		return name + ".bin"
+	default:
+		ext := filepath.Ext(name)
+		return name[:len(name)-len(ext)] + ".bin"
+	}
 }

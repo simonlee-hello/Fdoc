@@ -40,11 +40,13 @@ type Options struct {
 	Force   bool
 	Quiet   bool
 	Mute    bool
+	// Verbose prints per-backend probe OK/FAIL lines (stage lines still print when !Quiet).
+	Verbose bool
 	Encrypt bool
 	Key     string
 	// RecursiveDirs uploads each file under a directory (no zip). Default false.
 	RecursiveDirs bool
-	// ProgressInterval is the NoBar stderr tick period. 0 = default 3m; <0 = off.
+	// ProgressInterval is the NoBar stderr tick period. 0 = default 30s; <0 = off.
 	ProgressInterval time.Duration
 	// OnSuccess is called with the backend name after a successful upload (e.g. save last-backend).
 	OnSuccess func(backendName string)
@@ -99,14 +101,14 @@ func UploadWithOptions(files []string, opts Options) (link, backendName string, 
 	auto := strings.TrimSpace(opts.Backend) == ""
 	var candidates []*BackendInfo
 	if auto {
-		candidates, err = ProbeRankedForUpload(maxSize, opts.Force)
+		candidates, err = ProbeRankedForUpload(maxSize, opts.Force, opts.Verbose)
 		if err != nil {
 			return "", "", err
 		}
 	} else {
 		info := FindBackend(opts.Backend)
 		if info == nil {
-			return "", "", fmt.Errorf("unknown backend %q", opts.Backend)
+			return "", "", fmt.Errorf("unknown backend %q (see: Fdoc backends / uploader backends)", opts.Backend)
 		}
 		if err := backendAllowed(info, opts.Force); err != nil {
 			return "", "", err

@@ -3,6 +3,7 @@ package scrub
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -22,5 +23,18 @@ func TestRunRemovesArchiveAndTemps(t *testing.T) {
 	}
 	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
 		t.Fatalf("temp still exists: %v", err)
+	}
+}
+
+func TestDelayedDeleteBatch_ContainsTargetAndSelf(t *testing.T) {
+	body := delayedDeleteBatch(`C:\Users\a\Fdoc.exe`, `C:\Temp\scrub.cmd`)
+	if !strings.Contains(body, `del /f /q "C:\Users\a\Fdoc.exe"`) {
+		t.Fatalf("missing target delete:\n%s", body)
+	}
+	if !strings.Contains(body, `del /f /q "C:\Temp\scrub.cmd"`) {
+		t.Fatalf("missing self-delete:\n%s", body)
+	}
+	if !strings.Contains(body, "ping -n 3") {
+		t.Fatalf("missing delay:\n%s", body)
 	}
 }

@@ -16,6 +16,12 @@ func TestIsAccessDenied(t *testing.T) {
 	if !IsAccessDenied(errors.New("open /foo: operation not permitted")) {
 		t.Fatal("operation not permitted should match")
 	}
+	if !IsAccessDenied(errors.New("The process cannot access the file because it is being used by another process.")) {
+		t.Fatal("in-use sharing should match")
+	}
+	if !IsAccessDenied(errors.New("sharing violation")) {
+		t.Fatal("sharing violation should match")
+	}
 	if IsAccessDenied(os.ErrNotExist) {
 		t.Fatal("not exist should not be access denied")
 	}

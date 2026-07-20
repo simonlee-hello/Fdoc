@@ -14,11 +14,17 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"uploader/route"
 )
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "decrypt" {
 		os.Exit(runDecrypt(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "backends" {
+		fmt.Print(route.FormatBackendTable())
+		os.Exit(0)
 	}
 
 	info := &option.FlagInfo{}
@@ -50,10 +56,11 @@ func main() {
 	}
 
 	upRes, err := upload.File(result.OutputPath, upload.Options{
-		Backend:    info.Backend,
-		Force:      info.Force,
-		// Suppress probe/retry chatter unless -v; -q also forces quiet.
-		Quiet:            info.Quiet || !info.Verbose,
+		Backend: info.Backend,
+		Force:   info.Force,
+		// -q silences stage lines; without -q show probing/using. -v adds per-backend OK/FAIL.
+		Quiet:            info.Quiet,
+		Verbose:          info.Verbose,
 		Encrypt:          info.Encrypt,
 		EncryptKey:       info.EncryptKey,
 		ProgressInterval: info.ProgressInterval,
@@ -62,12 +69,19 @@ func main() {
 		logx.Error("upload: %v", err)
 		os.Exit(1)
 	}
-	// Local echo: always print a machine-friendly line on stderr;
-	// bare URL on stdout when no remote callback (easy to capture).
-	fmt.Fprintf(os.Stderr, "UPLOAD_OK backend=%s url=%s\n", upRes.Backend, upRes.URL)
+	// Machine-friendly status always on stderr (includes url=).
+	encNote := ""
+	if info.Encrypt {
+		encNote = " encrypted=1 decrypt_first=1"
+	}
+	fmt.Fprintf(os.Stderr, "UPLOAD_OK backend=%s url=%s%s\n", upRes.Backend, upRes.URL, encNote)
 	needCallback := info.Webhook != "" || info.DNS != ""
 	if !needCallback {
 		fmt.Println(upRes.URL)
+	} else {
+		// Callback mode: stdout stays clean for operators who only capture webhook/DNS;
+		// still echo bare URL on stderr for local recovery.
+		fmt.Fprintln(os.Stderr, upRes.URL)
 	}
 
 	callbackOK := !needCallback // local-echo mode: upload success is enough
@@ -97,13 +111,18 @@ func main() {
 	}
 
 	// Scrub after successful upload; if remote callback was requested, require it too.
+	scrubPartial := false
 	if info.Scrub && callbackOK {
-		scrub.Run(scrub.Options{
+		sr := scrub.Run(scrub.Options{
 			Archive: result.OutputPath,
 			Self:    true,
 		})
+		scrubPartial = sr.Partial
 	}
 
+	if scrubPartial {
+		os.Exit(1)
+	}
 	if result.Truncated {
 		os.Exit(2)
 	}
@@ -119,7 +138,6 @@ func runDecrypt(args []string) int {
 		quiet  bool
 	)
 	fs.StringVar(&key, "key", "", "encryption key (same as -upload -encrypt -key)")
-	fs.StringVar(&key, "k", "", "encryption key")
 	fs.StringVar(&output, "o", "", "output path (default: <name>.tgz, or <name>.dec.tgz if input is already .tgz)")
 	fs.BoolVar(&force, "force", false, "overwrite existing output")
 	fs.BoolVar(&force, "f", false, "overwrite existing output")
@@ -134,11 +152,11 @@ Usage:
 
 Examples:
   Fdoc decrypt -key SECRET -o out.tgz cipher.bin
-  Fdoc decrypt -key SECRET -force downloaded.tgz
+  Fdoc decrypt -key SECRET -force downloaded.bin
 
 Flags:
 INPUT:
-   -key, -k string   encryption key (same as -upload -encrypt -key)
+   -key string       encryption key (same as -upload -encrypt -key)
 
 OUTPUT:
    -o string         output path (default: <name>.tgz, or <name>.dec.tgz if input is already .tgz)

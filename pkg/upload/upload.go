@@ -12,9 +12,10 @@ type Options struct {
 	Backend          string // empty = auto
 	Force            bool
 	Quiet            bool
+	Verbose          bool
 	Encrypt          bool
 	EncryptKey       string
-	ProgressInterval time.Duration // 0=default 3m; <0=off
+	ProgressInterval time.Duration // 0=default 30s; <0=off
 }
 
 // Result is a successful upload.
@@ -29,6 +30,7 @@ func File(path string, opts Options) (Result, error) {
 		Backend:          opts.Backend,
 		Force:            opts.Force,
 		Quiet:            opts.Quiet,
+		Verbose:          opts.Verbose,
 		Mute:             true, // always capture link; callers decide what to print
 		Encrypt:          opts.Encrypt,
 		Key:              opts.EncryptKey,

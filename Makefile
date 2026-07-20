@@ -51,8 +51,3 @@ build-windows-signed:
 build-windows-Garble-upx-signed:
 	${BUILD_ENV} GOARCH=amd64 GOOS=windows garble -literals -tiny -seed=random build ${LDFLAGS-Win}  -o buildByGarbleUpxSigned/windows/${Name}-windows-amd64.exe main.go;upx -9 buildByGarbleUpxSigned/windows/${Name}-windows-amd64.exe;rm buildByGarbleUpxSigned/windows/${Name}-windows-amd64-signed.exe;${Limelighter} -I buildByGarbleUpxSigned/windows/${Name}-windows-amd64.exe -O buildByGarbleUpxSigned/windows/${Name}-windows-amd64-signed.exe -Domain ${SignDomain}
 	#${BUILD_ENV} GOARCH=386 GOOS=windows garble -literals -tiny -seed=random build ${LDFLAGS-Win}  -o buildByGarbleUpxSigned/windows/${Name}-windows-x86.exe main.go;upx -9 buildByGarbleUpxSigned/windows/${Name}-windows-x86.exe;rm buildByGarbleUpxSigned/windows/${Name}-windows-x86-signed.exe;${Limelighter} -I buildByGarbleUpxSigned/windows/${Name}-windows-x86.exe -O buildByGarbleUpxSigned/windows/${Name}-windows-x86-signed.exe -Domain ${SignDomain}
-
-
-# DLL build requires enabling cgo import in a dedicated main_dll.go
-build-dll:
-	CGO_ENABLED=1 GOARCH=386 GOOS=windows CC=i686-w64-mingw32-gcc go build ${LDFLAGS-Win} -buildmode=c-shared -o build/windows/dll/2345DLAgent.dll main_dll.go

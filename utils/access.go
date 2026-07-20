@@ -21,6 +21,8 @@ func IsAccessDenied(err error) bool {
 		"operation not permitted",
 		"access is denied",
 		"denied access",
+		"being used by another process",
+		"sharing violation",
 	} {
 		if strings.Contains(msg, needle) {
 			return true

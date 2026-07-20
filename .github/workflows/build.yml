@@ -43,3 +43,17 @@ jobs:
             Fdoc-linux-arm64
             Fdoc-darwin-amd64
             Fdoc-darwin-arm64
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Test
+        run: go test ./...
