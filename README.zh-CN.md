@@ -115,7 +115,7 @@ Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
 - 远端文件名仍用 `*.tgz`（`*.tar.gz` 会改成 `*.tgz`），方便过主机校验；**字节不是 gzip**，直接 `tar`/`gunzip` 会失败
 - 可用 `xxd` 核对：文件头应为 `55 50 30 31`（`UP01`）；若是 `1f 8b` 则是明文 gzip，未加密
 - `cipher` 大小应等于 `ENCRYPT_OK` 里的 `cipher=`
-- **磁盘**：`-encrypt` 会在归档**同目录**写临时密文（不用 `/tmp`，避免 tmpfs），上传期间大约需要 **1× 归档大小** 的额外空间。`Fdoc decrypt` 会写出完整明文（再约 1×），解密过程流式进行，不会把十几 GB 整包塞进内存。`-q` 只静默人类日志；`UPLOAD_OK` / `ENCRYPT_OK` / `DECRYPT_OK` 等机器行仍会输出。
+- **磁盘**：`-encrypt` 会在归档**同目录**写临时密文（不用 `/tmp`，避免 tmpfs），上传期间大约需要 **1× 归档大小** 的额外空间；若该目录不可写会回退到 `TempDir`（可能是 tmpfs，大文件需注意内存）。`Fdoc decrypt` 会写出完整明文（再约 1×），解密过程流式进行，不会把十几 GB 整包塞进内存。`-q` 只静默人类日志；`UPLOAD_OK` / `ENCRYPT_OK` / `DECRYPT_OK` 等机器行仍会输出。
 
 解密（**必做**；推荐 Fdoc 自带子命令，无需 uploader 二进制）：
 

@@ -60,6 +60,8 @@ if [[ -n "$UPLOADER_SRC" && -d "$UPLOADER_SRC" ]]; then
     apis/methods/httpclient.go
     apis/methods/timeout_override.go
     apis/methods/timeout_override_test.go
+    utils/progress.go
+    utils/progress_interval_test.go
   )
   sync_ok=1
   for rel in "${sync_paths[@]}"; do

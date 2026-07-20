@@ -23,3 +23,6 @@ third_party/uploader/rust/
 third_party/uploader/bin/
 third_party/uploader/uploader
 third_party/uploader/.idea/
+third_party/uploader/.github/
+third_party/uploader/.goreleaser.yml
+third_party/uploader/Makefile

@@ -6,14 +6,15 @@ import (
 )
 
 // probeHTTPTimeoutNs, when holders > 0, overrides HTTPTimeout for NewClient(0).
-// Holders let timed-out probe goroutines keep a short client timeout until the
-// in-flight upload actually finishes (probeOne does not join on deadline).
+// ProbeAll clears the override on return so a timed-out probe goroutine cannot
+// shrink the timeout of a subsequent real upload (often multi-GB).
 var (
 	probeHTTPTimeoutNs      atomic.Int64
 	probeHTTPTimeoutHolders atomic.Int32
 )
 
 // AcquireHTTPTimeout bumps a holder count and sets the override used by NewClient(0).
+// No-op when d <= 0 (does not bump holders).
 func AcquireHTTPTimeout(d time.Duration) {
 	if d <= 0 {
 		return
@@ -22,11 +23,29 @@ func AcquireHTTPTimeout(d time.Duration) {
 	probeHTTPTimeoutHolders.Add(1)
 }
 
-// ReleaseHTTPTimeout drops a holder; clears the override when the last holder exits.
+// ReleaseHTTPTimeout drops a holder; never goes below zero.
 func ReleaseHTTPTimeout() {
-	if probeHTTPTimeoutHolders.Add(-1) == 0 {
-		probeHTTPTimeoutNs.Store(0)
+	for {
+		cur := probeHTTPTimeoutHolders.Load()
+		if cur <= 0 {
+			probeHTTPTimeoutNs.Store(0)
+			return
+		}
+		if probeHTTPTimeoutHolders.CompareAndSwap(cur, cur-1) {
+			if cur == 1 {
+				probeHTTPTimeoutNs.Store(0)
+			}
+			return
+		}
 	}
+}
+
+// ClearHTTPTimeoutOverride drops any probe timeout override immediately.
+// ProbeAll defers this on return so real uploads use HTTPTimeout by default.
+// Already-built *http.Client instances keep whatever Timeout they were given.
+func ClearHTTPTimeoutOverride() {
+	probeHTTPTimeoutHolders.Store(0)
+	probeHTTPTimeoutNs.Store(0)
 }
 
 // WithHTTPTimeout runs fn while NewClient(0)/Do use the given timeout.

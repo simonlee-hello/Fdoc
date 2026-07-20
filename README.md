@@ -147,7 +147,7 @@ On Unix, `-upload` ignores `SIGHUP` so a dead parent session is less likely to k
 - On success stderr shows `ENCRYPT_OK plain=… cipher=… decrypt_first=1 …` — **always run `Fdoc decrypt` before** `tar` / `gunzip`
 - Check with `xxd`: header should be `55 50 30 31` (`UP01`); `1f 8b` means plaintext gzip (not encrypted)
 - Downloaded size should match `ENCRYPT_OK cipher=`
-- **Disk**: `-encrypt` writes a temporary ciphertext beside the archive (same directory, not `/tmp`), so you need about **1× archive size** free on that volume for the duration of the upload. `Fdoc decrypt` writes the full plaintext output (another ~1×) and streams decryption (no multi-GB RAM spike). `-q` only silences human logs; machine lines (`UPLOAD_OK` / `ENCRYPT_OK` / `DECRYPT_OK`) still print.
+- **Disk**: `-encrypt` writes a temporary ciphertext beside the archive (same directory, not `/tmp`), so you need about **1× archive size** free on that volume for the duration of the upload. If that directory is not writable, it falls back to `TempDir` (may be tmpfs — watch RAM). `Fdoc decrypt` writes the full plaintext output (another ~1×) and streams decryption (no multi-GB RAM spike). `-q` only silences human logs; machine lines (`UPLOAD_OK` / `ENCRYPT_OK` / `DECRYPT_OK`) still print.
 
 Decrypt with Fdoc (required before treating the download as an archive; no uploader binary needed):
 

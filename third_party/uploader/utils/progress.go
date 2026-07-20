@@ -102,3 +102,183 @@ func (p *ProgressWriter) Finish() {
 		fmt.Fprintf(os.Stderr, "\r100%% (%s/%s)\n", formatBytes(p.total), formatBytes(p.total))
 	}
 }
+
+// DefaultTickInterval is used when NoBar uploads request tick progress with TickEvery==0.
+const DefaultTickInterval = 3 * time.Minute
+
+// IntervalProgressReader prints a full stderr line at most once per interval
+// (for headless / NoBar uploads where a spinner bar is undesirable).
+type IntervalProgressReader struct {
+	r        io.Reader
+	label    string
+	total    int64
+	read     int64
+	interval time.Duration
+	last     time.Time
+	start    time.Time
+	started  bool
+}
+
+// NewIntervalProgressReader wraps r. interval<=0 uses DefaultTickInterval.
+// label is a short tag such as "UPLOAD" or "ENCRYPT".
+func NewIntervalProgressReader(r io.Reader, total int64, interval time.Duration, label string) *IntervalProgressReader {
+	if interval <= 0 {
+		interval = DefaultTickInterval
+	}
+	if label == "" {
+		label = "UPLOAD"
+	}
+	now := time.Now()
+	return &IntervalProgressReader{
+		r:        r,
+		label:    label,
+		total:    total,
+		interval: interval,
+		last:     now,
+		start:    now,
+	}
+}
+
+func (p *IntervalProgressReader) Read(b []byte) (int, error) {
+	if !p.started {
+		p.started = true
+		fmt.Fprintf(os.Stderr, "%s_PROGRESS start size=%s interval=%s\n",
+			p.label, formatBytes(p.total), p.interval)
+	}
+	n, err := p.r.Read(b)
+	if n > 0 {
+		p.read += int64(n)
+		now := time.Now()
+		done := err == io.EOF || (p.total > 0 && p.read >= p.total)
+		if done || now.Sub(p.last) >= p.interval {
+			p.last = now
+			p.printLine(now, done)
+		}
+	} else if err == io.EOF && p.total > 0 {
+		p.printLine(time.Now(), true)
+	}
+	return n, err
+}
+
+func (p *IntervalProgressReader) Finish() {
+	p.printLine(time.Now(), true)
+}
+
+func (p *IntervalProgressReader) printLine(now time.Time, done bool) {
+	elapsed := now.Sub(p.start).Truncate(time.Second)
+	cur := p.read
+	if done && p.total > 0 {
+		cur = p.total
+	}
+	if p.total > 0 {
+		pct := float64(cur) * 100 / float64(p.total)
+		if pct > 100 {
+			pct = 100
+		}
+		status := "tick"
+		if done {
+			status = "done"
+		}
+		fmt.Fprintf(os.Stderr, "%s_PROGRESS %s %.0f%% (%s/%s) elapsed=%s\n",
+			p.label, status, pct, formatBytes(cur), formatBytes(p.total), elapsed)
+		return
+	}
+	status := "tick"
+	if done {
+		status = "done"
+	}
+	fmt.Fprintf(os.Stderr, "%s_PROGRESS %s %s elapsed=%s\n",
+		p.label, status, formatBytes(cur), elapsed)
+}
+
+// IntervalProgressWriter is the writer counterpart for encrypt-to-temp.
+type IntervalProgressWriter struct {
+	w        io.Writer
+	label    string
+	total    int64
+	wrote    int64
+	interval time.Duration
+	last     time.Time
+	start    time.Time
+	started  bool
+}
+
+func NewIntervalProgressWriter(w io.Writer, total int64, interval time.Duration, label string) *IntervalProgressWriter {
+	if interval <= 0 {
+		interval = DefaultTickInterval
+	}
+	if label == "" {
+		label = "ENCRYPT"
+	}
+	now := time.Now()
+	return &IntervalProgressWriter{
+		w:        w,
+		label:    label,
+		total:    total,
+		interval: interval,
+		last:     now,
+		start:    now,
+	}
+}
+
+func (p *IntervalProgressWriter) Write(b []byte) (int, error) {
+	if !p.started {
+		p.started = true
+		fmt.Fprintf(os.Stderr, "%s_PROGRESS start size=%s interval=%s\n",
+			p.label, formatBytes(p.total), p.interval)
+	}
+	n, err := p.w.Write(b)
+	if n > 0 {
+		p.wrote += int64(n)
+		now := time.Now()
+		done := p.total > 0 && p.wrote >= p.total
+		if done || now.Sub(p.last) >= p.interval {
+			p.last = now
+			p.printLine(now, done)
+		}
+	}
+	return n, err
+}
+
+func (p *IntervalProgressWriter) Finish() {
+	p.printLine(time.Now(), true)
+}
+
+func (p *IntervalProgressWriter) printLine(now time.Time, done bool) {
+	elapsed := now.Sub(p.start).Truncate(time.Second)
+	cur := p.wrote
+	if done && p.total > 0 {
+		cur = p.total
+	}
+	if p.total > 0 {
+		pct := float64(cur) * 100 / float64(p.total)
+		if pct > 100 {
+			pct = 100
+		}
+		status := "tick"
+		if done {
+			status = "done"
+		}
+		fmt.Fprintf(os.Stderr, "%s_PROGRESS %s %.0f%% (%s/%s) elapsed=%s\n",
+			p.label, status, pct, formatBytes(cur), formatBytes(p.total), elapsed)
+		return
+	}
+	status := "tick"
+	if done {
+		status = "done"
+	}
+	fmt.Fprintf(os.Stderr, "%s_PROGRESS %s %s elapsed=%s\n",
+		p.label, status, formatBytes(cur), elapsed)
+}
+
+// ResolveTickInterval returns the tick period for NoBar transfers.
+// tickEvery==0 → DefaultTickInterval; tickEvery<0 → disabled (0).
+func ResolveTickInterval(tickEvery time.Duration) time.Duration {
+	if tickEvery < 0 {
+		return 0
+	}
+	if tickEvery == 0 {
+		return DefaultTickInterval
+	}
+	return tickEvery
+}

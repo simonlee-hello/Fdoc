@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"uploader/apis"
+	"uploader/apis/methods"
 )
 
 type slowBackend struct {
@@ -86,5 +87,24 @@ func TestProbeAllParallelFasterThanSerial(t *testing.T) {
 	// Serial would be ~900ms; parallel should be closer to ~300ms.
 	if elapsed > 700*time.Millisecond {
 		t.Fatalf("probe looks serial: elapsed=%v", elapsed)
+	}
+}
+
+func TestProbeAllClearsHTTPTimeoutOverride(t *testing.T) {
+	methods.ClearHTTPTimeoutOverride()
+	t.Cleanup(methods.ClearHTTPTimeoutOverride)
+
+	// Simulate a leftover short override from before/during probing.
+	methods.AcquireHTTPTimeout(12 * time.Second)
+	if methods.NewClient(0).Timeout != 12*time.Second {
+		t.Fatal("precondition: override not active")
+	}
+
+	if _, err := ProbeAll(nil, 1, time.Second, false); err != nil {
+		t.Fatal(err)
+	}
+	got := methods.NewClient(0).Timeout
+	if got != methods.HTTPTimeout {
+		t.Fatalf("after ProbeAll timeout=%v want default %v", got, methods.HTTPTimeout)
 	}
 }

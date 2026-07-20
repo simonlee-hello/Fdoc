@@ -53,9 +53,10 @@ func main() {
 		Backend:    info.Backend,
 		Force:      info.Force,
 		// Suppress probe/retry chatter unless -v; -q also forces quiet.
-		Quiet:      info.Quiet || !info.Verbose,
-		Encrypt:    info.Encrypt,
-		EncryptKey: info.EncryptKey,
+		Quiet:            info.Quiet || !info.Verbose,
+		Encrypt:          info.Encrypt,
+		EncryptKey:       info.EncryptKey,
+		ProgressInterval: info.ProgressInterval,
 	})
 	if err != nil {
 		logx.Error("upload: %v", err)
@@ -124,14 +125,26 @@ func runDecrypt(args []string) int {
 	fs.BoolVar(&force, "f", false, "overwrite existing output")
 	fs.BoolVar(&quiet, "q", false, "quiet")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, `Fdoc decrypt — decrypt a file encrypted by Fdoc/uploader -encrypt
-
-  Fdoc decrypt -key SECRET -o out.tgz cipher.bin
+		fmt.Fprintf(os.Stderr, `Fdoc decrypt — decrypt a file encrypted by Fdoc/uploader -encrypt.
 
 Format: UP01 | IV(16) | AES-256-CBC(PKCS7). Key is PKCS7-padded to 32 bytes.
 
+Usage:
+  Fdoc decrypt [flags] <cipher>
+
+Examples:
+  Fdoc decrypt -key SECRET -o out.tgz cipher.bin
+  Fdoc decrypt -key SECRET -force downloaded.tgz
+
+Flags:
+INPUT:
+   -key, -k string   encryption key (same as -upload -encrypt -key)
+
+OUTPUT:
+   -o string         output path (default: <name>.tgz, or <name>.dec.tgz if input is already .tgz)
+   -force, -f        overwrite existing output
+   -q                quiet
 `)
-		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2

@@ -141,7 +141,11 @@ func SelectProbeTargetsForSize(maxSize int64, force bool) []BackendInfo {
 // ProbeAll probes targets concurrently up to `parallel` workers.
 // Each probe uses UploadFileOpts (no global TransferConfig / Stdout mutation),
 // so timed-out probes need not be joined before returning.
+// On return, ClearHTTPTimeoutOverride runs so callers can safely start a real
+// upload with the default HTTPTimeout even if late probe goroutines linger.
 func ProbeAll(targets []BackendInfo, parallel int, timeout time.Duration, printLive bool) ([]ProbeResult, error) {
+	defer methods.ClearHTTPTimeoutOverride()
+
 	if parallel < 1 {
 		parallel = 1
 	}
@@ -268,6 +272,7 @@ func probeUpload(info BackendInfo, file string) (string, error) {
 		MaxBytes:    info.MaxBytes(),
 		BackendName: info.Name,
 		NoBar:       true,
+		TickEvery:   -1, // never spam interval progress during probes
 	})
 }
 

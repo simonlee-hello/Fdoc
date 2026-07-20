@@ -2,6 +2,7 @@ package methods
 
 import (
 	"io"
+	"time"
 )
 
 type MultiPartUploadConfig struct {
@@ -19,7 +20,8 @@ type TransferConfig struct {
 	NoBarMode     bool
 	CryptoMode    bool
 	CryptoKey     string
-	MaxBytes      int64  // 0 = unlimited
-	BackendName   string // for size-check messages
-	RecursiveDirs bool   // true: upload each file under dir; false: zip dir then upload
+	MaxBytes      int64         // 0 = unlimited
+	BackendName   string        // for size-check messages
+	RecursiveDirs bool          // true: upload each file under dir; false: zip dir then upload
+	TickEvery     time.Duration // NoBar progress ticks; 0=3m default, <0=off
 }

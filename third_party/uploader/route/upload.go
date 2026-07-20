@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"uploader/apis"
 	"uploader/crypto"
@@ -43,6 +44,8 @@ type Options struct {
 	Key     string
 	// RecursiveDirs uploads each file under a directory (no zip). Default false.
 	RecursiveDirs bool
+	// ProgressInterval is the NoBar stderr tick period. 0 = default 3m; <0 = off.
+	ProgressInterval time.Duration
 	// OnSuccess is called with the backend name after a successful upload (e.g. save last-backend).
 	OnSuccess func(backendName string)
 }
@@ -77,6 +80,7 @@ func UploadWithOptions(files []string, opts Options) (link, backendName string, 
 	cfg.CryptoMode = opts.Encrypt
 	cfg.CryptoKey = opts.Key
 	cfg.RecursiveDirs = opts.RecursiveDirs
+	cfg.TickEvery = opts.ProgressInterval
 
 	if opts.Encrypt {
 		_, normalized, err := crypto.NormalizeKey(opts.Key, false)

@@ -33,9 +33,16 @@ func RegisterFlags(fs *flag.FlagSet) {
 
 func NormalizeKey(key string, generateIfEmpty bool) (displayKey string, normalized string, err error) {
 	displayKey = key
-	if key == "" || len(key) > 32 {
+	switch {
+	case key == "":
 		if !generateIfEmpty {
 			return "", "", fmt.Errorf("key required")
+		}
+		displayKey = utils.GenRandString(16)
+		key = displayKey
+	case len(key) > 32:
+		if !generateIfEmpty {
+			return "", "", fmt.Errorf("key longer than 32 bytes")
 		}
 		displayKey = utils.GenRandString(16)
 		key = displayKey

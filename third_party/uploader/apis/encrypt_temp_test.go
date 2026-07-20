@@ -23,7 +23,7 @@ func TestEncryptFileToTempUsesSourceDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	encPath, encSize, err := encryptFileToTemp(src, key)
+	encPath, encSize, err := encryptFileToTemp(src, key, -1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,5 +39,34 @@ func TestEncryptFileToTempUsesSourceDir(t *testing.T) {
 	// Must not leave the only copy under the process default temp root when dirs differ.
 	if filepath.Dir(encPath) == filepath.Clean(os.TempDir()) && srcDir != filepath.Clean(os.TempDir()) {
 		t.Fatal("encrypted temp landed in os.TempDir")
+	}
+}
+
+func TestEncryptFileToTempFallsBackWhenSourceDirNotWritable(t *testing.T) {
+	root := t.TempDir()
+	srcDir := filepath.Join(root, "ro")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(srcDir, "plain.bin")
+	if err := os.WriteFile(src, []byte("fallback-enc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(srcDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(srcDir, 0o755) })
+
+	_, key, err := crypto.NormalizeKey("fallback-secret", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encPath, _, err := encryptFileToTemp(src, key, -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(encPath)
+	if filepath.Dir(encPath) == srcDir {
+		t.Fatalf("expected TempDir fallback, still in read-only dir %s", encPath)
 	}
 }

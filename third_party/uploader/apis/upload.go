@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"uploader/crypto"
 	"uploader/utils"
 )
@@ -160,6 +161,9 @@ type FileUploadOpts struct {
 	NoBar       bool
 	Crypto      bool
 	CryptoKey   string
+	// TickEvery controls NoBar interval progress lines on stderr.
+	// 0 = default 3m; <0 = disabled. Ignored when NoBar is false (live bar used).
+	TickEvery time.Duration
 }
 
 func fileOptsFromGlobal() FileUploadOpts {
@@ -169,6 +173,7 @@ func fileOptsFromGlobal() FileUploadOpts {
 		NoBar:       transferConfig.NoBarMode,
 		Crypto:      transferConfig.CryptoMode,
 		CryptoKey:   transferConfig.CryptoKey,
+		TickEvery:   transferConfig.TickEvery,
 	}
 }
 
@@ -249,7 +254,7 @@ func uploadWith(file string, size int64, backend BaseBackend, opts FileUploadOpt
 	if opts.Crypto {
 		// Encrypt to a temp file first so Content-Length matches bytes on the wire
 		// (streaming pipe + some multipart backends previously risked uploading plaintext).
-		encPath, encSize, err := encryptFileToTemp(file, opts.CryptoKey)
+		encPath, encSize, err := encryptFileToTemp(file, opts.CryptoKey, opts.TickEvery)
 		if err != nil {
 			return "", err
 		}
@@ -277,8 +282,12 @@ func uploadWith(file string, size int64, backend BaseBackend, opts FileUploadOpt
 	}
 	defer closer.Close()
 
+	var tick *utils.IntervalProgressReader
 	if !opts.NoBar {
 		reader = backend.StartProgress(reader, uploadSize)
+	} else if every := utils.ResolveTickInterval(opts.TickEvery); every > 0 {
+		tick = utils.NewIntervalProgressReader(reader, uploadSize, every, "UPLOAD")
+		reader = tick
 	}
 
 	if err = backend.DoUpload(name, uploadSize, reader); err != nil {
@@ -286,11 +295,13 @@ func uploadWith(file string, size int64, backend BaseBackend, opts FileUploadOpt
 	}
 	if !opts.NoBar {
 		backend.EndProgress()
+	} else if tick != nil {
+		tick.Finish()
 	}
 	return backend.PostUpload(name, uploadSize)
 }
 
-func encryptFileToTemp(srcPath, key string) (encPath string, encSize int64, err error) {
+func encryptFileToTemp(srcPath, key string, tickEvery time.Duration) (encPath string, encSize int64, err error) {
 	src, err := os.Open(srcPath)
 	if err != nil {
 		return "", 0, err
@@ -305,7 +316,13 @@ func encryptFileToTemp(srcPath, key string) (encPath string, encSize int64, err 
 	}
 	tmp, err := os.CreateTemp(tmpDir, ".uploader-enc-*.bin")
 	if err != nil {
-		return "", 0, err
+		// Read-only / full volume: fall back so encrypt still works when possible.
+		fallback := os.TempDir()
+		fmt.Fprintf(os.Stderr, "encrypt temp in %s failed (%v); fallback %s (may be tmpfs — large files need RAM/disk)\n", tmpDir, err, fallback)
+		tmp, err = os.CreateTemp(fallback, ".uploader-enc-*.bin")
+		if err != nil {
+			return "", 0, err
+		}
 	}
 	encPath = tmp.Name()
 	defer func() {
@@ -315,8 +332,20 @@ func encryptFileToTemp(srcPath, key string) (encPath string, encSize int64, err 
 		}
 	}()
 
-	if err = crypto.StreamEncrypt(src, tmp, key, 0); err != nil {
+	plainSize, _ := src.Stat()
+	var encOut io.Writer = tmp
+	var tick *utils.IntervalProgressWriter
+	if every := utils.ResolveTickInterval(tickEvery); every > 0 && plainSize != nil {
+		wantCipher := crypto.CalcEncryptSize(plainSize.Size())
+		tick = utils.NewIntervalProgressWriter(tmp, wantCipher, every, "ENCRYPT")
+		encOut = tick
+	}
+
+	if err = crypto.StreamEncrypt(src, encOut, key, 0); err != nil {
 		return "", 0, err
+	}
+	if tick != nil {
+		tick.Finish()
 	}
 	if err = tmp.Sync(); err != nil {
 		return "", 0, err
