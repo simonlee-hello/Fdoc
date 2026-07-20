@@ -1,11 +1,12 @@
 package pkg
 
 import (
+	"Fdoc/logx"
 	"Fdoc/option"
 	"Fdoc/utils"
 	"bufio"
-	"fmt"
-	"github.com/projectdiscovery/gologger"
+	"bytes"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,111 +14,164 @@ import (
 	"time"
 )
 
-// FileFilter 文件过滤器结构体
+// FileFilter applies date/name/keyword/extension filters.
 type FileFilter struct {
-	info *option.FlagInfo // 命令行参数信息
+	info       *option.FlagInfo
+	extensions map[string]struct{}
+	keywords   []string
+	filenames  []string
+	afterDate  time.Time
+	hasDate    bool
 }
 
-// NewFileFilter 创建一个新的文件过滤器
+// NewFileFilter builds a FileFilter with cached filter criteria.
 func NewFileFilter(info *option.FlagInfo) *FileFilter {
-	return &FileFilter{info: info}
-}
-
-// Filter 过滤文件，根据多个条件进行过滤
-func (ff *FileFilter) Filter(path string, d fs.DirEntry) bool {
-	return ff.dateFilter(d) && ff.filenameFilter(d) && ff.keywordFilter(path) && ff.extFilter(d)
-}
-
-// extFilter 根据文件后缀进行过滤
-func (ff *FileFilter) extFilter(d fs.DirEntry) bool {
-	if ff.info.Extension == "" {
-		return true
+	ff := &FileFilter{info: info}
+	ff.extensions = buildExtensionMap(info.Extension)
+	if info.FileName != "" {
+		ff.filenames = utils.ConvertStringToList(info.FileName)
 	}
+	if info.Keyword != "" {
+		ff.keywords = utils.ConvertStringToList(info.Keyword)
+	}
+	if info.AfterDateStr != "" {
+		afterDate, err := time.ParseInLocation("2006-01-02", info.AfterDateStr, time.Local)
+		if err != nil {
+			logx.Error("Failed to parse after date %q: %v", info.AfterDateStr, err)
+		} else {
+			ff.afterDate = afterDate
+			ff.hasDate = true
+		}
+	}
+	return ff
+}
 
-	ext := filepath.Ext(d.Name())
-	extensionsMap := utils.StringToMap(ff.info.Extension)
-	if ff.info.Extension == "all" {
-		extensionsMap = map[string]struct{}{
+func buildExtensionMap(extension string) map[string]struct{} {
+	extension = strings.ToLower(strings.TrimSpace(extension))
+	if extension == "" || extension == "any" || extension == "*" {
+		return nil
+	}
+	switch extension {
+	case "all":
+		// Common docs + archives + txt (NOT every file on disk).
+		return map[string]struct{}{
 			".pdf": {}, ".docx": {}, ".doc": {}, ".xlsx": {}, ".xls": {}, ".csv": {},
 			".pptx": {}, ".ppt": {}, ".zip": {}, ".rar": {}, ".7z": {}, ".tar": {}, ".gz": {}, ".tgz": {},
 			".bak": {}, ".bz2": {}, ".txt": {},
 		}
-	} else if ff.info.Extension == "documents" {
-		extensionsMap = map[string]struct{}{
+	case "documents":
+		return map[string]struct{}{
 			".pdf": {}, ".docx": {}, ".doc": {}, ".xlsx": {}, ".xls": {}, ".csv": {},
 			".pptx": {}, ".ppt": {},
 		}
-	} else if ff.info.Extension == "archives" {
-		extensionsMap = map[string]struct{}{
+	case "archives", "packages":
+		return map[string]struct{}{
 			".zip": {}, ".rar": {}, ".7z": {}, ".tar": {}, ".gz": {}, ".tgz": {}, ".bak": {}, ".bz2": {},
 		}
-	} else if ff.info.Extension == "images" {
-		extensionsMap = map[string]struct{}{
+	case "images":
+		return map[string]struct{}{
 			".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {}, ".bmp": {},
 		}
-	} else if ff.info.Extension == "videos" {
-		extensionsMap = map[string]struct{}{
+	case "videos":
+		return map[string]struct{}{
 			".mp4": {}, ".mkv": {}, ".avi": {}, ".mov": {},
 		}
+	default:
+		return utils.StringToMap(extension)
 	}
-	_, ok := extensionsMap[ext]
+}
+
+// Filter returns true when the file matches all active criteria (AND).
+// Cheap checks run first; content keyword scan runs last.
+func (ff *FileFilter) Filter(path string, d fs.DirEntry) bool {
+	return ff.extFilter(d) && ff.dateFilter(d) && ff.filenameFilter(d) && ff.keywordFilter(path)
+}
+
+func (ff *FileFilter) extFilter(d fs.DirEntry) bool {
+	if ff.extensions == nil {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(d.Name()))
+	_, ok := ff.extensions[ext]
 	return ok
 }
 
-// dateFilter 根据文件修改时间进行过滤
 func (ff *FileFilter) dateFilter(d fs.DirEntry) bool {
-	if ff.info.AfterDateStr == "" {
+	if !ff.hasDate {
 		return true
 	}
-
-	afterDate, err := time.Parse("2006-01-02", ff.info.AfterDateStr)
+	fileInfo, err := d.Info()
 	if err != nil {
-		fmt.Errorf("Failed to parse after date: %v", err)
-		os.Exit(0)
+		return false
 	}
-
-	fileInfo, _ := d.Info()
-	return afterDate.IsZero() || fileInfo.ModTime().After(afterDate)
+	// Include files modified on the given day (local midnight) or later.
+	return !fileInfo.ModTime().Before(ff.afterDate)
 }
 
-// 文件名匹配过滤
 func (ff *FileFilter) filenameFilter(d fs.DirEntry) bool {
-	if ff.info.FileName == "" {
+	if len(ff.filenames) == 0 {
 		return true
 	}
-
-	queryStrings := strings.Split(ff.info.FileName, ",")
-	for _, queryString := range queryStrings {
-		if strings.Contains(strings.ToLower(d.Name()), strings.ToLower(queryString)) {
+	name := strings.ToLower(d.Name())
+	for _, query := range ff.filenames {
+		if query == "" {
+			continue
+		}
+		if strings.Contains(name, strings.ToLower(query)) {
 			return true
 		}
 	}
 	return false
 }
 
-// 文件内容关键字匹配过滤
 func (ff *FileFilter) keywordFilter(path string) bool {
-	if ff.info.Keyword == "" {
+	if len(ff.keywords) == 0 {
 		return true
 	}
 
 	file, err := os.Open(path)
 	if err != nil {
-		gologger.Error().Msgf("open file error：%v", err)
+		// Inaccessible / unreadable files simply do not match.
+		logx.Debug("keyword open skip: %s (%v)", path, err)
 		return false
 	}
 	defer file.Close()
 
-	reader := bufio.NewReader(file)
-	keyword := strings.ToLower(ff.info.Keyword)
+	// Skip obvious binary files (NUL in the first 512 bytes).
+	header := make([]byte, 512)
+	n, _ := io.ReadFull(file, header)
+	if n > 0 && bytes.IndexByte(header[:n], 0) >= 0 {
+		return false
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		logx.Debug("keyword seek skip: %s (%v)", path, err)
+		return false
+	}
+
+	const maxScanBytes = 8 << 20 // 8MB
+	reader := bufio.NewReader(io.LimitReader(file, maxScanBytes))
+	lowerKeywords := make([]string, 0, len(ff.keywords))
+	for _, kw := range ff.keywords {
+		kw = strings.TrimSpace(kw)
+		if kw != "" {
+			lowerKeywords = append(lowerKeywords, strings.ToLower(kw))
+		}
+	}
+	if len(lowerKeywords) == 0 {
+		return true
+	}
+
 	for {
 		line, err := reader.ReadString('\n')
-		if strings.Contains(strings.ToLower(line), keyword) {
-			return true
+		lowerLine := strings.ToLower(line)
+		for _, kw := range lowerKeywords {
+			if strings.Contains(lowerLine, kw) {
+				return true
+			}
 		}
 		if err != nil {
-			if err.Error() != "EOF" {
-				gologger.Error().Msgf("error when reading file：%v", err)
+			if err != io.EOF {
+				logx.Debug("keyword read skip: %s (%v)", path, err)
 			}
 			break
 		}

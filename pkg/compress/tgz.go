@@ -1,109 +1,102 @@
 package compress
 
 import (
+	"Fdoc/logx"
 	"Fdoc/utils"
 	"archive/tar"
 	"compress/gzip"
-	"github.com/projectdiscovery/gologger"
 	"io"
 	"os"
 	"path/filepath"
 )
 
-// TarGzWriter 封装了 tar.Writer 和其相关的资源
+// TarGzWriter wraps tar/gzip writers and the output file.
 type TarGzWriter struct {
 	TarWriter *tar.Writer
 	gzWriter  *gzip.Writer
 	file      *os.File
+	closed    bool
 }
 
-// NewTarGzWriter 创建一个新的 TarGzWriter
+// NewTarGzWriter creates a streaming tar.gz writer.
 func NewTarGzWriter(outputPath string) (*TarGzWriter, error) {
-	// 创建一个输出tar+gzip归档文件
 	file, err := os.Create(outputPath)
 	if err != nil {
-		gologger.Error().Msgf("output file create failed: %v", err)
+		logx.Error("output file create failed: %v", err)
 		return nil, err
 	}
 
-	// 创建一个gzip写入器
 	gzWriter, err := gzip.NewWriterLevel(file, gzip.BestSpeed)
 	if err != nil {
-		gologger.Error().Msgf("gzip writer creation failed: %v", err)
-		_ = file.Close() // 关闭文件
+		logx.Error("gzip writer creation failed: %v", err)
+		_ = file.Close()
 		return nil, err
 	}
 
-	// 创建一个tar写入器
-	tarWriter := tar.NewWriter(gzWriter)
-
 	return &TarGzWriter{
-		TarWriter: tarWriter,
+		TarWriter: tar.NewWriter(gzWriter),
 		gzWriter:  gzWriter,
 		file:      file,
 	}, nil
 }
 
-// Close 关闭所有相关的资源
+// Close closes the tar, gzip, and file writers. Safe to call multiple times.
 func (tw *TarGzWriter) Close() error {
-	var errors []error
+	if tw == nil || tw.closed {
+		return nil
+	}
+	tw.closed = true
+
+	var firstErr error
+	closeOne := func(fn func() error) {
+		if fn == nil {
+			return
+		}
+		if err := fn(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
 
 	if tw.TarWriter != nil {
-		if err := tw.TarWriter.Close(); err != nil {
-			errors = append(errors, err)
-		}
+		closeOne(tw.TarWriter.Close)
 	}
 	if tw.gzWriter != nil {
-		if err := tw.gzWriter.Close(); err != nil {
-			errors = append(errors, err)
-		}
+		closeOne(tw.gzWriter.Close)
 	}
 	if tw.file != nil {
-		if err := tw.file.Close(); err != nil {
-			errors = append(errors, err)
-		}
+		closeOne(tw.file.Close)
 	}
-
-	if len(errors) > 0 {
-		// 在这里处理所有的关闭错误，例如记录日志或返回错误
-		return errors[0] // 这里简单返回第一个错误，你也可以根据需求处理所有错误
-	}
-
-	return nil
+	return firstErr
 }
 
-// FileToTarGz 将文件添加到 tar.gz 归档中
-func FileToTarGz(filePath string, rootDir string, tarWriter *tar.Writer) {
+// FileToTarGz appends a single file into the tar archive.
+func FileToTarGz(filePath string, rootDir string, tarWriter *tar.Writer) error {
 	file, err := os.Open(filePath)
 	if err != nil {
-		gologger.Warning().Msgf("Unable to open the file %s: %v\n", filePath, err)
-		return
+		return err
 	}
 	defer file.Close()
 
-	// 获取文件信息
 	info, err := file.Stat()
 	if err != nil {
-		gologger.Warning().Msgf("Failed to obtain file information: %v\n", err)
-		return
+		return err
 	}
 
-	// 创建tar头
-	header := new(tar.Header)
-	header.Name, _ = filepath.Rel(rootDir, filePath)
-	header.Name = utils.TransformSlash(header.Name)
-	header.Size = info.Size()
-	header.Mode = int64(info.Mode())
-	header.ModTime = info.ModTime()
-
-	// 将头部写入tar归档
-	if err := tarWriter.WriteHeader(header); err != nil {
-		gologger.Warning().Msgf("Failed to write tar header: %v\n", err)
-	}
-
-	// 将文件内容拷贝到tar归档中
-	_, err = io.Copy(tarWriter, file)
+	rel, err := filepath.Rel(rootDir, filePath)
 	if err != nil {
-		gologger.Warning().Msgf("Unable to copy %s to tar archive: %v\n", header.Name, err)
+		rel = filepath.Base(filePath)
 	}
+
+	header := &tar.Header{
+		Name:    utils.TransformSlash(rel),
+		Size:    info.Size(),
+		Mode:    int64(info.Mode()),
+		ModTime: info.ModTime(),
+	}
+
+	if err := tarWriter.WriteHeader(header); err != nil {
+		return err
+	}
+	_, err = io.Copy(tarWriter, file)
+	return err
 }

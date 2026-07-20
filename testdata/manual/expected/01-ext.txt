@@ -1,0 +1,5 @@
+keep/old.txt
+keep/readme.txt
+keep/report.pdf
+keep/secret.txt
+nested/deep/notes.txt

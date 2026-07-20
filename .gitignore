@@ -1,0 +1,19 @@
+# macOS / IDE
+.DS_Store
+.idea/
+*.iml
+
+# Build & local artifacts
+/build/
+/Fdoc
+/Fdoc-*
+/output_*.tar.gz
+
+# Manual test binaries / generated outs
+testdata/manual/Fdoc*
+testdata/manual/fdoc
+testdata/manual/out/
+
+# Go
+*.test
+*.out

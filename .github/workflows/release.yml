@@ -18,11 +18,17 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Test
+        run: go test ./...
+
       - name: Build
         run: |
-          GOOS=windows GOARCH=amd64 go build -o Fdoc-windows-amd64.exe .
-          GOOS=linux GOARCH=amd64 go build -o Fdoc-linux-amd64 .
-          GOOS=darwin GOARCH=amd64 go build -o Fdoc-darwin-amd64 .
+          LDFLAGS='-s -w'
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="$LDFLAGS" -o Fdoc-windows-amd64.exe .
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$LDFLAGS" -o Fdoc-linux-amd64 .
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="$LDFLAGS" -o Fdoc-darwin-amd64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="$LDFLAGS" -o Fdoc-linux-arm64 .
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="$LDFLAGS" -o Fdoc-darwin-arm64 .
 
       - name: Create Release
         id: create_release
@@ -55,6 +61,16 @@ jobs:
           asset_name: Fdoc-linux-amd64
           asset_content_type: application/octet-stream
 
+      - name: Upload Linux ARM64 Binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./Fdoc-linux-arm64
+          asset_name: Fdoc-linux-arm64
+          asset_content_type: application/octet-stream
+
       - name: Upload macOS Binary
         uses: actions/upload-release-asset@v1
         env:
@@ -63,4 +79,14 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./Fdoc-darwin-amd64
           asset_name: Fdoc-darwin-amd64
+          asset_content_type: application/octet-stream
+
+      - name: Upload macOS ARM64 Binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./Fdoc-darwin-arm64
+          asset_name: Fdoc-darwin-arm64
           asset_content_type: application/octet-stream

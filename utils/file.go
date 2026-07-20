@@ -1,17 +1,17 @@
 package utils
 
 import (
-	"github.com/projectdiscovery/gologger"
+	"Fdoc/logx"
 	"os"
 )
 
-// 计算文件总大小
+// GetTotalSize returns the total size of the given files.
 func GetTotalSize(files []string) int64 {
 	totalSize := int64(0)
 	for _, filePath := range files {
 		fileInfo, err := os.Lstat(filePath)
 		if err != nil {
-			gologger.Error().Msgf("Unable to obtain file information %s: %v\n", filePath, err)
+			logx.Error("Unable to obtain file information %s: %v", filePath, err)
 			continue
 		}
 		totalSize += fileInfo.Size()
@@ -20,14 +20,12 @@ func GetTotalSize(files []string) int64 {
 }
 
 func DeleteFile(path string) {
-	if IsFileExists(path) {
-		err := os.Remove(path)
-		if err != nil {
-			gologger.Error().Str("path", path).Msg("delete failed")
-			return
-		}
+	if !IsFileExists(path) {
+		return
 	}
-
+	if err := os.Remove(path); err != nil {
+		logx.Error("delete failed: %s", path)
+	}
 }
 
 func IsFileExists(filePath string) bool {

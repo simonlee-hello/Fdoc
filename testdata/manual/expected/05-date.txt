@@ -1,0 +1,3 @@
+keep/readme.txt
+keep/secret.txt
+nested/deep/notes.txt

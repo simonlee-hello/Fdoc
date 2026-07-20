@@ -1,0 +1,4 @@
+keep/config.ini
+keep/old.txt
+keep/secret.txt
+nested/deep/notes.txt
