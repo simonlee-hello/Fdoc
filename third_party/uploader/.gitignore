@@ -1,0 +1,10 @@
+.idea/*
+.idea
+.DS_Store
+**.js
+transfer
+/bin/
+/uploader
+.reg-report.txt
+.reg-rust-report.txt
+*.encrypt

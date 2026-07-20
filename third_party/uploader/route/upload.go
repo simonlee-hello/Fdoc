@@ -1,12 +1,31 @@
 package route
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"uploader/apis"
 )
+
+// needsFullUpload is true when apis.Upload must run (zip dir, -r walk, encrypt key normalize).
+// Plain single-file uploads can use UploadFile so library callers get a returned link.
+func needsFullUpload(files []string) bool {
+	if len(files) != 1 {
+		return true
+	}
+	cfg := apis.TransferConfig()
+	if cfg.CryptoMode || cfg.RecursiveDirs {
+		return true
+	}
+	fi, err := os.Stat(files[0])
+	if err != nil || fi.IsDir() {
+		return true
+	}
+	return false
+}
 
 // Options controls UploadAuto / UploadWithOptions.
 type Options struct {
@@ -81,11 +100,19 @@ func UploadWithOptions(files []string, opts Options) (link, backendName string, 
 			fmt.Fprintf(os.Stderr, "retry backend %s...\n", info.Name)
 		}
 		setupUploadFor(info)
-		if len(files) == 1 {
-			link, lastErr = uploadFileQuiet(files[0], info.Backend, apis.MuteMode)
+		// Prefer apis.Upload for dir zip / recursive / encrypt (UploadFile skips those).
+		// Plain single files keep UploadFile so Mute library callers get a returned link.
+		// Single-path Mute + full Upload: capture stdout so Encrypt/dir also return a link
+		// (Fdoc and other embedders rely on the return value, not printed stdout).
+		if needsFullUpload(files) {
+			if apis.MuteMode && len(files) == 1 && !apis.TransferConfig().RecursiveDirs {
+				link, lastErr = uploadMutedCapture(files, info.Backend)
+			} else {
+				lastErr = apis.Upload(files, info.Backend)
+				link = "" // multi / verbose: links printed by Upload when MuteMode
+			}
 		} else {
-			lastErr = apis.Upload(files, info.Backend)
-			link = "" // multi-file: links printed by Upload when MuteMode
+			link, lastErr = uploadFileQuiet(files[0], info.Backend, apis.MuteMode)
 		}
 		if lastErr == nil {
 			if opts.OnSuccess != nil {
@@ -119,6 +146,39 @@ func uploadFileQuiet(path string, backend apis.BaseBackend, mute bool) (string, 
 		_ = devNull.Close()
 	}()
 	return apis.UploadFile(path, backend)
+}
+
+// uploadMutedCapture runs apis.Upload with MuteMode, capturing links written to stdout.
+func uploadMutedCapture(files []string, backend apis.BaseBackend) (string, error) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return "", apis.Upload(files, backend)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		_ = r.Close()
+		done <- strings.TrimSpace(buf.String())
+	}()
+	upErr := apis.Upload(files, backend)
+	_ = w.Close()
+	os.Stdout = old
+	out := <-done
+	return lastHTTPURL(out), upErr
+}
+
+func lastHTTPURL(s string) string {
+	var last string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "http://") || strings.HasPrefix(line, "https://") {
+			last = line
+		}
+	}
+	return last
 }
 
 func backendAllowed(info *BackendInfo, force bool) error {
