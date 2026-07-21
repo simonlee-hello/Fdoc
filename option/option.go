@@ -19,6 +19,10 @@ import (
 type FlagInfo struct {
 	MaxSize      string
 	MaxFileSize  string
+	// MaxSet / MaxFileSet are true when -max / -max-file appeared on the CLI.
+	// Implicit soft -max refuses silent truncate; -max-file defaults to off (0).
+	MaxSet       bool
+	MaxFileSet   bool
 	OutputPath   string
 	AfterDateStr string
 	RootPath     string
@@ -164,8 +168,8 @@ func validateWebhookURL(raw string) error {
 // GetFlag registers and parses CLI flags.
 func (info *FlagInfo) GetFlag() {
 	flag.Usage = printUsage
-	flag.StringVar(&info.MaxSize, "max", "1GB", "stop packing after this total size")
-	flag.StringVar(&info.MaxFileSize, "max-file", "100MB", "skip files larger than this (0=off)")
+	flag.StringVar(&info.MaxSize, "max", "1GB", "total size budget (pass explicitly to allow truncate; 0=off)")
+	flag.StringVar(&info.MaxFileSize, "max-file", "0", "skip files larger than this (default 0=off; pass explicitly to enable)")
 	flag.StringVar(&info.OutputPath, "o", "", "output .tgz path")
 	flag.StringVar(&info.AfterDateStr, "t", "", "only files on/after date (YYYY-MM-DD)")
 	flag.StringVar(&info.RootPath, "d", "", "scan root (default: home)")
@@ -193,6 +197,14 @@ func (info *FlagInfo) GetFlag() {
 	flag.StringVar(&info.EncryptKey, "key", "", "encrypt key (with -encrypt; not -k/-keyword)")
 
 	flag.Parse()
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "max":
+			info.MaxSet = true
+		case "max-file":
+			info.MaxFileSet = true
+		}
+	})
 	info.CBTimeout = time.Duration(cbTimeoutSec * float64(time.Second))
 	if progressIntervalMin <= 0 {
 		info.ProgressInterval = -1 // disable ticks
@@ -228,8 +240,9 @@ Examples:
   Fdoc decrypt -key SECRET -o out.tgz cipher.bin
 
 Filters (-e/-f/-k/-keyword/-t) are AND; comma lists inside one flag are OR.
-Default: -e documents, -max 1GB, -max-file 100MB.
-Exit: 0 ok, 1 error, 2 hit -max (partial kept). Docs: README.md / README.zh-CN.md
+Default: -e documents, soft -max 1GB (implicit hit → exit 1), -max-file 0 (off).
+Pass -max explicitly to allow truncate (exit 2). Pass -max-file to skip oversized files.
+Exit: 0 ok, 1 error, 2 explicit -max truncate (partial kept). Docs: README.md / README.zh-CN.md
 
 Flags:
 INPUT:
@@ -244,8 +257,8 @@ FILTERING:
 
 PACK:
    -o string                 output .tgz path (default output_<timestamp>.tgz)
-   -max string               stop packing after this total size (default "1GB")
-   -max-file string          skip a single file larger than this (default "100MB"; 0=off)
+   -max string               total size budget (default "1GB"; must pass explicitly to truncate; 0=off)
+   -max-file string          skip a single file larger than this (default "0"=off)
    -size                     measure matched size only; do not pack
    -force                    overwrite existing -o; also allow flaky/down upload backends
 

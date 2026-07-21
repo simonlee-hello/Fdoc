@@ -161,11 +161,21 @@ func WalkAndCompress(info *option.FlagInfo) RunResult {
 		allocated := utils.AllocatedSize(fileInfo)
 
 		if maxFileBytes > 0 && logical > maxFileBytes {
+			if !info.MaxFileSet {
+				return fmt.Errorf(
+					"-max-file %s would skip %s (%s); re-run with -max-file on the CLI (e.g. -max-file %s) or use -max-file 0",
+					info.MaxFileSize, path, utils.BytesToSize(logical), suggestMaxFile(logical))
+			}
 			logx.Debug("skip file over -max-file: %s (%s)", path, utils.BytesToSize(logical))
 			return nil
 		}
 
 		if maxBytes > 0 && totalLogical+logical > maxBytes {
+			if !info.MaxSet {
+				return fmt.Errorf(
+					"default -max %s would truncate (already matched %d files / %s); re-run with -max %s or -max 0",
+					info.MaxSize, matchedFiles, utils.BytesToSize(totalLogical), suggestMax(totalLogical+logical))
+			}
 			truncated = true
 			logx.Warning("reached -max %s; keeping partial result", info.MaxSize)
 			return fs.SkipAll
@@ -256,6 +266,22 @@ func WalkAndCompress(info *option.FlagInfo) RunResult {
 		MatchedFiles: matchedFiles,
 		Truncated:    truncated,
 	}
+}
+
+// suggestMaxFile picks a raised -max-file example above need (or the file size itself).
+func suggestMaxFile(need int64) string {
+	if need <= 0 {
+		return "500MB"
+	}
+	return utils.BytesToSize(need)
+}
+
+// suggestMax picks a raised -max example above the would-be cumulative size.
+func suggestMax(need int64) string {
+	if need <= 0 {
+		return "5GB"
+	}
+	return utils.BytesToSize(need)
 }
 
 // printPackSummary writes pack status to stderr so stdout stays clean for

@@ -2,7 +2,7 @@
 
 Directory: `testdata/manual/src`
 
-Defaults changed: `-e documents`, `-max-file 100MB`, OS skip lists, `-max` keeps partial archive (exit 2).
+Defaults changed: `-e documents`, soft `-max 1GB` (implicit hit → exit 1; explicit truncate → exit 2), `-max-file` default off.
 
 ## Quick checks
 

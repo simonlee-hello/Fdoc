@@ -13,8 +13,8 @@ Static binaries for Linux, Windows, and macOS.
 - Filter by extension / filename / content keyword / modification date
 - Filters combine with **AND**; values inside `-e` / `-f` / `-k` use **OR**
 - Default `-e documents` (safer than matching every file)
-- Cap total matched logical size (`-max`, default 1GB) with **best-effort** packing
-- Skip oversized single files (`-max-file`, default 100MB; `0` disables)
+- Soft total cap: `-max` default 1GB. If you did **not** pass `-max` on the CLI and packing would hit it, Fdoc **fails** (exit 1) and asks you to re-run with an explicit `-max` (or `0` to disable). Passing `-max` enables best-effort truncate.
+- Per-file cap `-max-file` defaults to `0` (off); pass it explicitly to skip oversized single files.
 - Skip noisy directories by default (OS-specific); override with `-x`
 - Stream while walking (no collect-then-compress memory spike)
 - `-size` measures only (disk + logical) and respects `-max` / `-max-file`
@@ -65,15 +65,17 @@ flowchart TD
   F -->|pass| G[-k / -keyword content]
   G -->|fail| Z1
   G -->|pass| H{-max-file exceeded?}
-  H -->|yes| Z1
+  H -->|yes| Z1[Skip if -max-file set else fail]
   H -->|no| I{-max would exceed?}
-  I -->|yes| Z2[Truncate: stop further walk]
+  I -->|yes| Z2[Truncate if -max set else fail]
   I -->|no| J{-size?}
   J -->|yes| Z3[Count size]
   J -->|no| Z4[Append to tgz]
 ```
 
-Defaults: `-e documents`; OS-specific `-x`. Hitting `-max` keeps the partial archive (exit 2).
+Defaults: `-e documents`; OS-specific `-x`; `-max-file 0` (off). Soft `-max 1GB` requires an explicit CLI `-max` to truncate; otherwise exit 1. Explicit `-max` truncate keeps the partial archive (exit 2).
+
+If you are unsure how large the match set is, **run `-size` first** (measure only, no pack), then choose filters / an explicit `-max`.
 
 ## Usage
 
@@ -85,10 +87,10 @@ Defaults: `-e documents`; OS-specific `-x`. Hitting `-max` keeps the partial arc
   -f string       fuzzy filename match, comma-separated (OR); AND with other filters
   -k, -keyword    content keywords, comma-separated (OR); prefer -keyword (-k ≠ -key)
                   (skips binary; scans up to 8MB per file)
-  -max string     max total LOGICAL size of matched files (default 1GB);
-                  packing stops at the limit and KEEPS the partial archive (exit 2)
+  -max string     max total LOGICAL size (default soft 1GB). Pass explicitly to allow
+                  truncate+keep partial (exit 2); 0=unlimited. Implicit hit → exit 1.
   -max-file string
-                  skip a single file larger than this logical size (default 100MB; 0=off)
+                  per-file LOGICAL cap (default 0=off). Pass explicitly to skip oversized files.
   -o string       output path (default output_<timestamp>.tgz)
   -size           measure matched size only; does not pack; respects -max/-max-file
   -t string       only files modified on/after this local date, e.g. 2023-10-01
@@ -242,15 +244,17 @@ Compatible with `uploader decrypt -k 'SECRET' -o recovered.tgz downloaded.tgz`.
 | Flag | Uses | Behavior |
 |------|------|----------|
 | `-size` | disk + logical | Report both; stop early if `-max` would be exceeded |
-| `-max` | **logical** cumulative | Archive write budget; truncate keep partial |
-| `-max-file` | **logical** per file | Skip file and continue |
+| `-max` | **logical** cumulative | Soft default 1GB: implicit hit → fail; explicit → truncate keep partial |
+| `-max-file` | **logical** per file | Default `0` (off); when set, skip oversized and continue |
 
-Exit codes: `0` ok, `1` error (including invalid `-max`/`-t` / upload/callback failure), `2` truncated at `-max` (still may upload when `-upload` is set).
+Tip: if you do not know how large the files to pack are, run `-size` first, then pack (and set `-max` if needed).
+
+Exit codes: `0` ok, `1` error (including implicit `-max` refusal / invalid flags / upload/callback failure), `2` truncated at **explicit** `-max` (still may upload when `-upload` is set).
 
 ### Examples
 
 ```shell
-# 1) Probe size, then pack
+# 1) Unsure of size? Probe with -size first, then pack
 Fdoc -d /data/docs -e documents -size
 Fdoc -d /data/docs -e documents -max 500MB -o docs.tgz
 

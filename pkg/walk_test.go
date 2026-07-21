@@ -93,7 +93,9 @@ func TestWalk_MaxBestEffortKeepsArchive(t *testing.T) {
 		OutputPath:  out,
 		Extension:   "documents",
 		MaxSize:     "1000",
+		MaxSet:      true,
 		MaxFileSize: "0",
+		MaxFileSet:  true,
 	}
 	result := WalkAndCompress(info)
 	if result.Err != nil {
@@ -114,6 +116,71 @@ func TestWalk_MaxBestEffortKeepsArchive(t *testing.T) {
 	}
 }
 
+func TestWalk_ImplicitMaxRefusesTruncate(t *testing.T) {
+	root := t.TempDir()
+	out := filepath.Join(t.TempDir(), "out.tar.gz")
+	for _, name := range []string{"a.pdf", "b.pdf", "c.pdf"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(strings.Repeat("x", 600)), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	info := &option.FlagInfo{
+		RootPath:    root,
+		OutputPath:  out,
+		Extension:   "documents",
+		MaxSize:     "1000",
+		MaxSet:      false, // default soft cap: must not silently truncate
+		MaxFileSize: "0",
+		MaxFileSet:  true,
+	}
+	result := WalkAndCompress(info)
+	if result.Err == nil {
+		t.Fatal("expected error when implicit -max would truncate")
+	}
+	if !strings.Contains(result.Err.Error(), "-max") {
+		t.Fatalf("error should mention -max: %v", result.Err)
+	}
+	if result.Truncated {
+		t.Fatal("must not report Truncated when refusing implicit default")
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Fatal("partial archive must be deleted")
+	}
+}
+
+func TestWalk_ImplicitMaxFileRefusesSkip(t *testing.T) {
+	root := t.TempDir()
+	out := filepath.Join(t.TempDir(), "out.tar.gz")
+	if err := os.WriteFile(filepath.Join(root, "small.pdf"), []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "big.pdf"), []byte(strings.Repeat("y", 2000)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	info := &option.FlagInfo{
+		RootPath:    root,
+		OutputPath:  out,
+		Extension:   "documents",
+		MaxSize:     "1GB",
+		MaxSet:      true,
+		MaxFileSize: "1000",
+		MaxFileSet:  false, // default soft cap: must not silently skip
+	}
+	result := WalkAndCompress(info)
+	if result.Err == nil {
+		t.Fatal("expected error when implicit -max-file would skip")
+	}
+	if !strings.Contains(result.Err.Error(), "-max-file") {
+		t.Fatalf("error should mention -max-file: %v", result.Err)
+	}
+	if !strings.Contains(result.Err.Error(), "big.pdf") {
+		t.Fatalf("error should name the file: %v", result.Err)
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Fatal("partial archive must be deleted")
+	}
+}
+
 func TestWalk_SkipsOutputArchiveInSameDir(t *testing.T) {
 	root := t.TempDir()
 	out := filepath.Join(root, "out.tar.gz")
@@ -130,7 +197,9 @@ func TestWalk_SkipsOutputArchiveInSameDir(t *testing.T) {
 		OutputPath:  out,
 		Extension:   "any",
 		MaxSize:     "1GB",
+		MaxSet:      true,
 		MaxFileSize: "0",
+		MaxFileSet:  true,
 	}
 	result := WalkAndCompress(info)
 	if result.Err != nil {
@@ -164,7 +233,9 @@ func TestWalk_MaxFileSkipsLarge(t *testing.T) {
 		OutputPath:  out,
 		Extension:   "documents",
 		MaxSize:     "1GB",
+		MaxSet:      true,
 		MaxFileSize: "1000",
+		MaxFileSet:  true,
 	}
 	result := WalkAndCompress(info)
 	if result.Err != nil {
@@ -191,7 +262,9 @@ func TestWalk_CloseBeforeSizeReport(t *testing.T) {
 		OutputPath:  out,
 		Extension:   "documents",
 		MaxSize:     "1GB",
+		MaxSet:      true,
 		MaxFileSize: "0",
+		MaxFileSet:  true,
 	}
 	result := WalkAndCompress(info)
 	if result.Err != nil {
@@ -219,7 +292,9 @@ func TestWalk_TruncateWithZeroFiles_ExitTruncated(t *testing.T) {
 		OutputPath:  out,
 		Extension:   "documents",
 		MaxSize:     "100",
+		MaxSet:      true,
 		MaxFileSize: "0",
+		MaxFileSet:  true,
 	}
 	result := WalkAndCompress(info)
 	if result.Err != nil {

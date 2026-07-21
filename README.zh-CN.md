@@ -13,8 +13,8 @@
 - 按后缀 / 文件名 / 内容关键字 / 修改日期筛选
 - 多个条件之间是 **且**；同一参数内逗号分隔是 **或**
 - 默认 `-e documents`（不会扫全盘所有文件）
-- `-max` 限制打包总大小（默认 1GB），超限保留已打部分（退出码 2）
-- `-max-file` 跳过过大单文件（默认 100MB，`0` 关闭）
+- 软限制：默认 `-max 1GB`。**未在命令行显式传入 `-max`** 却触达时会失败（exit 1），提示加 `-max`（或 `-max 0` 关闭）；显式传入后才启用截断保留
+- `-max-file` 默认 `0`（不限制单文件）；显式传入后才跳过超大文件
 - 默认跳过系统垃圾目录，可用 `-x` 覆盖
 - 边扫边打，不占大内存
 - `-size` 只统计大小，不打包
@@ -63,24 +63,26 @@ flowchart TD
   F -->|通过| G[-k / -keyword 内容]
   G -->|不通过| Z1
   G -->|通过| H{-max-file 超限?}
-  H -->|是| Z1
+  H -->|是| Z1[显式 -max-file 则跳过否则失败]
   H -->|否| I{-max 累计将超限?}
-  I -->|是| Z2[截断：停止后续扫描]
+  I -->|是| Z2[显式 -max 则截断否则失败]
   I -->|否| J{-size?}
   J -->|是| Z3[计入大小]
   J -->|否| Z4[写入 tgz]
 ```
 
-默认：`-e documents`；`-x` 为各 OS 跳过列表；触达 `-max` 保留已打部分（exit 2）。
+默认：`-e documents`；`-x` 为各 OS 跳过列表；`-max-file` 默认关闭。软限制 `-max 1GB` 未显式传入却触达 → exit 1；显式 `-max` 截断保留部分包（exit 2）。
+
+不清楚会匹配多大时，**建议先跑一遍 `-size`**（只统计、不打包），看 `disk` / `logical` 再决定是否加 `-max` 或收紧筛选。
 
 ## 快速开始
 
 ```shell
+# 不清楚体积时先估大小（推荐）
+Fdoc -d /data -size
+
 # 打包某个目录下的文档
 Fdoc -d /data -o out.tgz
-
-# 只看会打出多大
-Fdoc -d /data -size
 
 # 打包并上传，链接打到屏幕上
 Fdoc -d /data -o out.tgz -upload -q
@@ -101,8 +103,8 @@ Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
 | `-f` | 文件名包含（逗号=或） |
 | `-k` / `-keyword` | 文件内容包含（逗号=或；推荐 `-keyword`，勿与 `-key` 混淆） |
 | `-t` | 只收该日期及以后修改的文件（`YYYY-MM-DD`） |
-| `-max` | 匹配文件累计逻辑大小上限（默认 1GB） |
-| `-max-file` | 单文件上限（默认 100MB，`0`=不限制） |
+| `-max` | 累计逻辑大小软上限（默认 1GB）；须显式传参才截断保留；`0`=不限制 |
+| `-max-file` | 单文件上限（默认 `0`=不限制；显式传入后才跳过超大文件） |
 | `-x` | 跳过目录（逗号分隔；设置后覆盖默认跳过列表；Windows 默认相对 home） |
 | `-size` | 只统计，不打包 |
 | `-q` / `-v` | 安静 / 详细（`-v` 才输出每个后端 probe OK/FAIL） |
@@ -117,7 +119,7 @@ Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
 
 子命令：`Fdoc backends`、`Fdoc decrypt …`。
 
-退出码：`0` 成功，`1` 错误（含 `SCRUB_PARTIAL`），`2` 触达 `-max`（部分包已保留；若开了 `-upload` 仍可能上传）。
+退出码：`0` 成功，`1` 错误（含未显式传 `-max` 却触达默认总预算、`SCRUB_PARTIAL`），`2` **显式** `-max` 截断（部分包已保留；若开了 `-upload` 仍可能上传）。
 
 ## 筛选规则
 
@@ -144,8 +146,10 @@ Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
 | 参数 | 含义 |
 |------|------|
 | `-size` | 报告磁盘占用 + 逻辑大小；会受 `-max` 影响提前停 |
-| `-max` | 累计逻辑大小预算；超限保留部分包 |
-| `-max-file` | 单文件过大则跳过，继续打别的 |
+| `-max` | 软默认 1GB：未显式传参触达 → 失败；显式传入 → 截断保留部分包 |
+| `-max-file` | 默认关闭；显式传入后跳过过大单文件并继续 |
+
+不清楚要打包的文件有多大时，建议先执行 `-size`：只扫不打，便于对照逻辑大小是否会撞默认 `-max`，再决定预算或过滤条件。
 
 ## 上传与回传
 
@@ -239,7 +243,7 @@ Unix 下 `-upload` 会忽略 `SIGHUP`，降低会话断开导致中途被杀的�
 ## 更多例子
 
 ```shell
-# 先看大小再打包
+# 先看大小再打包（不确定体积时务必先 -size）
 Fdoc -d /data/docs -e documents -size
 Fdoc -d /data/docs -e documents -max 500MB -o docs.tgz
 
