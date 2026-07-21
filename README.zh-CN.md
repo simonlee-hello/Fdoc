@@ -12,6 +12,7 @@
 
 - 按后缀 / 文件名 / 内容关键字 / 修改日期筛选
 - 多个条件之间是 **且**；同一参数内逗号分隔是 **或**
+- `-keyword secrets`（别名 `creds`）：展开为赋值/JSON 凭证子串
 - 默认 `-e documents`（不会扫全盘所有文件）
 - 软限制：默认 `-max 1GB`。**未在命令行显式传入 `-max`** 却触达时会失败（exit 1），提示加 `-max`（或 `-max 0` 关闭）；显式传入后才启用截断保留
 - `-max-file` 默认 `0`（不限制单文件）；显式传入后才跳过超大文件
@@ -101,7 +102,7 @@ Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
 | `-o` | 输出路径（默认 `output_<时间>.tgz`） |
 | `-e` | 后缀：`documents`（默认）/ `all`（≠全部文件）/ `any`（不限后缀）/ `pdf,txt,...` |
 | `-f` | 文件名包含（逗号=或） |
-| `-k` / `-keyword` | 文件内容包含（逗号=或；推荐 `-keyword`，勿与 `-key` 混淆） |
+| `-k` / `-keyword` | 文件内容包含（逗号=或；预设 `secrets`/`creds`；推荐 `-keyword`，勿与 `-key` 混淆） |
 | `-t` | 只收该日期及以后修改的文件（`YYYY-MM-DD`） |
 | `-max` | 累计逻辑大小软上限（默认 1GB）；须显式传参才截断保留；`0`=不限制 |
 | `-max-file` | 单文件上限（默认 `0`=不限制；显式传入后才跳过超大文件） |
@@ -127,6 +128,7 @@ Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
 |------|------|
 | `-e pdf -f secret` | 后缀 pdf **且** 文件名含 secret |
 | `-k password:,token:` | 内容含 password: **或** token: |
+| `-keyword secrets` | 预设：赋值写法（`password=`、`password :` 等）**或** JSON（`"password":` 等）；别名 `creds` |
 | `-e any` | 不限后缀（仍可与 `-f`/`-k`/`-t` 组合） |
 | `-e all` | 常见文档+压缩包+txt，**不是**全盘所有文件 |
 
@@ -140,6 +142,12 @@ Fdoc -d /data -o out.tgz -upload -webhook https://host/hook -scrub
 | `images` | jpg/png/gif/bmp |
 | `videos` | mp4/mkv/avi/mov |
 | `any` | 不限制后缀 |
+
+### 关键词预设
+
+| 预设 | 含义 |
+|------|------|
+| `secrets` / `creds` | 展开为凭证赋值/JSON 子串（`password:`、`"password":`、`api_key=`、`密码：` 等）。可混用字面量：`-keyword secrets,corp_sso=`。仍跳过明显二进制；单文件最多扫约 8MB。 |
 
 ### 大小相关
 
@@ -252,6 +260,7 @@ Fdoc -q -o docs.tgz
 
 # 按文件名 / 内容找
 Fdoc -d /data -f password,secret -e any -o hits.tgz
+Fdoc -d /data -e txt,ini,conf,json -keyword secrets -o hits.tgz
 Fdoc -d /data -e txt,ini,conf -k token:,password: -o hits.tgz
 
 # 只要某日期之后的

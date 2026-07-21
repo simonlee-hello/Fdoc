@@ -32,7 +32,7 @@ func NewFileFilter(info *option.FlagInfo) *FileFilter {
 		ff.filenames = utils.ConvertStringToList(info.FileName)
 	}
 	if info.Keyword != "" {
-		ff.keywords = utils.ConvertStringToList(info.Keyword)
+		ff.keywords = expandKeywordTokens(info.Keyword)
 	}
 	if info.AfterDateStr != "" {
 		afterDate, err := time.ParseInLocation("2006-01-02", info.AfterDateStr, time.Local)
@@ -79,6 +79,78 @@ func buildExtensionMap(extension string) map[string]struct{} {
 	default:
 		return utils.StringToMap(extension)
 	}
+}
+
+// secretPresetKeys are base names expanded by the secrets/creds keyword preset.
+var secretPresetKeys = []string{
+	"password", "passwd", "pwd", "token",
+	"api_key", "access_key", "secret_key", "client_secret", "private_key", "aws_secret",
+}
+
+var secretPresetKeysCN = []string{"密码", "口令"}
+
+// expandKeywordTokens splits -keyword/-k by comma; known presets expand to assign/JSON variants.
+func expandKeywordTokens(raw string) []string {
+	parts := utils.ConvertStringToList(raw)
+	out := make([]string, 0, len(parts)*16)
+	seen := make(map[string]struct{}, len(parts)*16)
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		if _, ok := seen[s]; ok {
+			return
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, part := range parts {
+		switch strings.ToLower(part) {
+		case "secrets", "creds":
+			for _, k := range secretPresetKeys {
+				for _, v := range assignmentVariants(k) {
+					add(v)
+				}
+			}
+			for _, k := range secretPresetKeysCN {
+				for _, v := range assignmentVariantsCN(k) {
+					add(v)
+				}
+			}
+		default:
+			add(part)
+		}
+	}
+	return out
+}
+
+// assignmentVariants builds bare / double-quoted / single-quoted assign forms for an ASCII key.
+func assignmentVariants(key string) []string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil
+	}
+	seps := []string{":", "=", " :", " ="}
+	out := make([]string, 0, len(seps)*3)
+	for _, sep := range seps {
+		out = append(out, key+sep, `"`+key+`"`+sep, `'`+key+`'`+sep)
+	}
+	return out
+}
+
+// assignmentVariantsCN adds half-width and full-width separators, plus JSON double quotes.
+func assignmentVariantsCN(key string) []string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil
+	}
+	seps := []string{":", "=", " :", " =", "：", "＝", " ：", " ＝"}
+	out := make([]string, 0, len(seps)*2)
+	for _, sep := range seps {
+		out = append(out, key+sep, `"`+key+`"`+sep)
+	}
+	return out
 }
 
 // Filter returns true when the file matches all active criteria (AND).

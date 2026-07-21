@@ -175,8 +175,8 @@ func (info *FlagInfo) GetFlag() {
 	flag.StringVar(&info.RootPath, "d", "", "scan root (default: home)")
 	flag.StringVar(&info.SkipDirs, "x", "", "dirs to skip (comma-separated)")
 	flag.StringVar(&info.FileName, "f", "", "filename contains (comma = OR)")
-	flag.StringVar(&info.Keyword, "k", "", "file content contains (comma = OR); prefer -keyword")
-	flag.StringVar(&info.Keyword, "keyword", "", "file content contains (comma = OR)")
+	flag.StringVar(&info.Keyword, "k", "", "content keywords or preset secrets|creds (comma=OR); prefer -keyword")
+	flag.StringVar(&info.Keyword, "keyword", "", "content keywords or preset secrets|creds (comma=OR)")
 	flag.StringVar(&info.Extension, "e", "documents", "ext filter: documents|all|any|pdf,txt,...")
 	flag.BoolVar(&info.Size, "size", false, "only measure size, do not pack")
 	flag.BoolVar(&info.Quiet, "q", false, "quiet")
@@ -242,6 +242,7 @@ Examples:
 Filters (-e/-f/-k/-keyword/-t) are AND; comma lists inside one flag are OR.
 Default: -e documents, soft -max 1GB (implicit hit → exit 1), -max-file 0 (off).
 Pass -max explicitly to allow truncate (exit 2). Pass -max-file to skip oversized files.
+-keyword secrets|creds expands to password:/="…" assign + JSON "password": forms (scan ≤8MB/file).
 Exit: 0 ok, 1 error, 2 explicit -max truncate (partial kept). Docs: README.md / README.zh-CN.md
 
 Flags:
@@ -252,7 +253,7 @@ INPUT:
 FILTERING:
    -e string                 ext filter: documents|all|any|pdf,txt,zip,... (default "documents"; all≠any)
    -f string                 filename contains (comma = OR)
-   -k, -keyword string       file content contains (comma = OR); prefer -keyword (-k≠-key)
+   -k, -keyword string       content match (comma = OR); presets: secrets|creds; prefer -keyword (-k≠-key)
    -t string                 only files modified on/after date (YYYY-MM-DD)
 
 PACK:

@@ -12,6 +12,7 @@ Static binaries for Linux, Windows, and macOS.
 
 - Filter by extension / filename / content keyword / modification date
 - Filters combine with **AND**; values inside `-e` / `-f` / `-k` use **OR**
+- `-keyword secrets` (alias `creds`): expand to assign + JSON credential substrings
 - Default `-e documents` (safer than matching every file)
 - Soft total cap: `-max` default 1GB. If you did **not** pass `-max` on the CLI and packing would hit it, Fdoc **fails** (exit 1) and asks you to re-run with an explicit `-max` (or `0` to disable). Passing `-max` enables best-effort truncate.
 - Per-file cap `-max-file` defaults to `0` (off); pass it explicitly to skip oversized single files.
@@ -85,8 +86,8 @@ If you are unsure how large the match set is, **run `-size` first** (measure onl
                   presets: documents, all (common docs+archives+txt; NOT every file),
                            archives|packages, images, videos, any (no ext filter)
   -f string       fuzzy filename match, comma-separated (OR); AND with other filters
-  -k, -keyword    content keywords, comma-separated (OR); prefer -keyword (-k ≠ -key)
-                  (skips binary; scans up to 8MB per file)
+  -k, -keyword    content keywords or preset secrets|creds (comma=OR); prefer -keyword (-k ≠ -key)
+                  (skips binary; scans up to 8MB per file; secrets expands assign + JSON "password": forms)
   -max string     max total LOGICAL size (default soft 1GB). Pass explicitly to allow
                   truncate+keep partial (exit 2); 0=unlimited. Implicit hit → exit 1.
   -max-file string
@@ -225,6 +226,7 @@ Compatible with `uploader decrypt -k 'SECRET' -o recovered.tgz downloaded.tgz`.
 |------------|---------|
 | `-e pdf -f secret` | pdf **and** filename contains secret |
 | `-k password:,token:` | content contains password: **or** token: |
+| `-keyword secrets` | preset: assign forms (`password=`, `password :`, …) **or** JSON (`"password":`, …); alias `creds` |
 | `-e any` | no extension restriction (still AND with `-f`/`-k`/`-t` if set) |
 | `-e all` | common docs + archives + txt only — **not** “all files on disk” |
 
@@ -238,6 +240,12 @@ Compatible with `uploader decrypt -k 'SECRET' -o recovered.tgz downloaded.tgz`.
 | `images` | jpg/png/gif/bmp |
 | `videos` | mp4/mkv/avi/mov |
 | `any` | no extension filter |
+
+### Keyword presets
+
+| Preset | Meaning |
+|--------|---------|
+| `secrets` / `creds` | Expand to credential-like assign/JSON substrings (`password:`, `"password":`, `api_key=`, 密码：, …). Mix with literals: `-keyword secrets,corp_sso=`. Still skips obvious binaries; scans ≤8MB per file. |
 
 ### Size semantics
 
@@ -263,6 +271,7 @@ Fdoc -q -o docs.tgz
 
 # 3) Filename / keyword hits
 Fdoc -d /data -f password,secret -e any -o hits.tgz
+Fdoc -d /data -e txt,ini,conf,json -keyword secrets -o hits.tgz
 Fdoc -d /data -e txt,ini,conf -k token:,password: -o hits.tgz
 
 # 4) Recent files
