@@ -2,7 +2,7 @@
 
 Directory: `testdata/manual/src`
 
-Defaults changed: `-e documents`, soft `-max 1GB` (implicit hit → exit 1; explicit truncate → exit 2), `-max-file` default off.
+Defaults changed: `-e documents`, soft `-max 1GB` (implicit hit → exit 1; explicit truncate → exit 2), `-max-file` default off. Keyword preset: `-keyword secrets` / `creds`.
 
 ## Quick checks
 
@@ -13,6 +13,9 @@ BIN=./Fdoc-macos
 # default documents only
 $BIN -d src -x skipme -o out/01-docs.tar.gz -q; echo exit:$?
 tar -tzf out/01-docs.tar.gz
+
+# keyword preset (creds assign / JSON forms)
+$BIN -d src -e any -x skipme -keyword secrets -o out/02-secrets.tar.gz -q; echo exit:$?
 
 # measure respects max
 $BIN -d src -e any -x skipme -max 100 -max-file 0 -size -q; echo exit:$?
